@@ -87,6 +87,7 @@ def kit_files(src, bld, a):
     k['nxrt.lib'] = (bld / 'lib' / 'nxrt.lib', 'windows-native build (the import library the game DLL links against)')
     k['hle_inventory.tsv'] = (src / 'src/nxrt/gen/out/hle_inventory.tsv', 'windows-native source (the runtime\'s registry: nxanalyze --hle)')
     k['play.ps1'] = (src / 'scripts/play.ps1', 'windows-native source (the launcher)')
+    for n in ('split.ps1', 'splitsave.ps1'): k[n] = (src / 'scripts' / n, 'windows-native source (split screen: play.ps1 hands over to split.ps1 beside it)')
     for f in sorted((src / 'src/nxshader').glob('*.py')): k[f'nxshader/{f.name}'] = (f, 'windows-native source (the shader tool)')
     k['nxshader/dmsh_abi.h'] = (src / 'src/nxrt/gfx/dmsh_abi.h', 'windows-native source (the shader ABI nxshader reflects against)')
     k['lld-link.exe'] = (pathlib.Path(a.lld), 'LLVM for Windows')

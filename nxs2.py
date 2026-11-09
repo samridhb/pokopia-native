@@ -168,7 +168,7 @@ def llvm_tool(name):
 
 # ---- Windows: the Windows game's own tools (the recompiler and runtime from windows/: nxanalyze, nxlift, nxrt; lld-link; SPIRV-Tools for nxshader)
 WIN_KIT_FILES = ('nxanalyze.exe', 'nxlift.exe', 'nxrt.exe', 'SDL3.dll', 'nxrt.lib', 'lld-link.exe', 'spirv-opt.exe', 'spirv-val.exe', 'hle_inventory.tsv',
-                 'play.ps1', 'nxshader/nxshader.py', 'nxshader/dmsh_abi.h')
+                 'play.ps1', 'split.ps1', 'splitsave.ps1', 'nxshader/nxshader.py', 'nxshader/dmsh_abi.h')   # split.ps1 (and the splitsave.ps1 it loads): split screen
 
 
 def win_tools():
@@ -183,6 +183,7 @@ def win_tools():
         src = HERE / 'windows'; rel = src / 'build' / 'Release'
         t = {n: rel / 'bin' / n for n in ('nxanalyze.exe', 'nxlift.exe', 'nxrt.exe', 'SDL3.dll')}
         t.update({'nxrt.lib': rel / 'lib' / 'nxrt.lib', 'hle_inventory.tsv': src / 'src/nxrt/gen/out/hle_inventory.tsv', 'play.ps1': src / 'scripts/play.ps1',
+                  'split.ps1': src / 'scripts/split.ps1', 'splitsave.ps1': src / 'scripts/splitsave.ps1',
                   'nxshader/nxshader.py': src / 'src/nxshader/nxshader.py', 'nxshader/dmsh_abi.h': src / 'src/nxrt/gfx/dmsh_abi.h',
                   'lld-link.exe': llvm_tool('lld-link'), 'dir': rel / 'bin'})
         t['gamecontrollerdb.txt'] = src / 'src/nxrt/front/third_party/SDL_GameControllerDB/gamecontrollerdb.txt'
@@ -1171,7 +1172,7 @@ def st_win_play(b, t):
     the translator and the installer's three lowering steps), windows/play.json, and the launcher out/Play Pokopia <version>.cmd. The save it plays is
     %APPDATA%\\Pokopia Native\\<version>\\save, created empty the first time (nxs2.py import-save brings an existing one)."""
     rt = b.win / 'runtime'
-    for n in ('nxrt.exe', 'SDL3.dll', 'play.ps1', 'spirv-opt.exe', 'spirv-val.exe'): copy_if_changed(t[n], rt / n)
+    for n in ('nxrt.exe', 'SDL3.dll', 'play.ps1', 'split.ps1', 'splitsave.ps1', 'spirv-opt.exe', 'spirv-val.exe'): copy_if_changed(t[n], rt / n)   # play.ps1 hands split screen to split.ps1 beside it
     if t.get('gamecontrollerdb.txt') and pathlib.Path(t['gamecontrollerdb.txt']).is_file(): copy_if_changed(t['gamecontrollerdb.txt'], rt / 'gamecontrollerdb.txt')   # nxrt reads it beside itself
     nxs = pathlib.Path(t['nxshader/nxshader.py']).parent
     for f in sorted(nxs.glob('*.py')): copy_if_changed(f, rt / 'nxshader' / f.name)
