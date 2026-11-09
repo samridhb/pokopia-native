@@ -1090,6 +1090,7 @@ def sign(args):
 SAVES_ROOT = r'%APPDATA%\Pokopia Native'       # the Windows game's saves, one per game version: <root>\<version>\save
 WORK_ROOT = r'%LOCALAPPDATA%\Pokopia Native'   # its pipeline cache, temp files and logs: <root>\<version>
 RUNTIME_INSTALLER = ('tools/s2_dumps.py', 'tools/lower_corpus.py', 'tools/s2_pkg.py', f'profile/{TITLE}/runtime_keys.tsv')   # the on-demand path's steps
+LINUX_LAUNCHER = ('linux/play_window.py', 'nxs2.py', 'nxs2_gui.py')   # play.sh's launcher window, the update check and the look it takes from here
 
 
 def win_env(t):
@@ -1385,7 +1386,7 @@ def st_lin_play(b, t):
     nxs = pathlib.Path(t['nxshader/nxshader.py']).parent
     for f in sorted(nxs.glob('*.py')): copy_if_changed(f, rt / 'nxshader' / f.name)
     copy_if_changed(next(p for p in (nxs / 'dmsh_abi.h', nxs.parent / 'nxrt/gfx/dmsh_abi.h') if p.is_file()), rt / 'nxshader' / 'dmsh_abi.h')
-    for rel in RUNTIME_INSTALLER: copy_if_changed(HERE / rel, rt / 'installer' / rel)
+    for rel in RUNTIME_INSTALLER + LINUX_LAUNCHER: copy_if_changed(HERE / rel, rt / 'installer' / rel)
     copy_if_changed(AMPERE, rt / 'installer/ampere-lower/ampere-lower')
     for f in sorted((HERE / 'host/windows/dmsh_xlate_bin').iterdir()): copy_if_changed(f, rt / 'installer/host/windows/dmsh_xlate_bin' / f.name)   # the same IL as Windows
     for n in ('nxrt', 'play.sh', 'spirv-opt', 'spirv-val', 'installer/ampere-lower/ampere-lower'): (rt / n).chmod(0o755)
