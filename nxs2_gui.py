@@ -58,10 +58,12 @@ def build_dir_for(dump):
 
 
 # ---------------------------------------------------------------- the walkthrough's look
-# The in-game settings menu's colours (windows-native src/nxrt/front/menu.c): a white-lavender panel, lavender pills, yellow for what you choose
-C = {'bg': '#FAF8FF', 'edge': '#C8BAF6', 'title': '#423680', 'text': '#403C60', 'soft': '#827CA0', 'pill': '#EEE9FD', 'pill_hi': '#E5DDFB',
-     'sel': '#FFDE46', 'sel_hi': '#F5D02A', 'seltext': '#463400', 'light': '#FFF4C4', 'card': '#FFFFFF', 'ok': '#0F6E56', 'bad': '#A32D2D',
-     'badbg': '#FCEBEB', 'warn': '#854F0B', 'log': '#403C60', 'logtext': '#EEE9FD'}
+# The GitHub page's colours (tools/make_readme_art.py), shared with the launchers and the in-game menu: white cards on a pale
+# lavender-pink, ink text, and the fade (hot pink -> magenta -> purple) for what you choose and the one thing to do next
+C = {'bg': '#FBF6FD', 'edge': '#EAE2F2', 'title': '#1C1626', 'text': '#3A3346', 'soft': '#6A6277', 'pill': '#F5EDFF', 'pill_hi': '#EDE2FF',
+     'sel': '#D23CF0', 'sel_hi': '#BF2EDD', 'seltext': '#FFFFFF', 'light': '#FFEAF3', 'card': '#FFFFFF', 'ok': '#0F6E56', 'bad': '#A32D2D',
+     'badbg': '#FCEBEB', 'warn': '#854F0B', 'log': '#1C1626', 'logtext': '#F4F0FA', 'accent': '#D4185A', 'link': '#7B3FF7'}
+FADE = ('#FF3D8E', '#D23CF0', '#8A3FFC')   # left to right, as the GitHub page's Download buttons
 FAMILY = 'Segoe UI' if WIN else 'Helvetica Neue' if MAC else 'DejaVu Sans'
 MONO = 'Menlo' if MAC else 'Consolas' if WIN else 'DejaVu Sans Mono'
 SCALE = 1.0   # Linux: the desktop's scale (its DPI / 96), for the window's size and the walkthrough's width
@@ -188,6 +190,21 @@ def rrect(cv, x0, y0, x1, y1, r, **kw):
     return cv.create_polygon(pts, smooth=True, **kw)
 
 
+def fade_at(t, dim=1.0):   # the colour t (0..1) of the way along the fade, darkened by dim
+    t = min(max(t, 0.0), 1.0) * (len(FADE) - 1); i = min(int(t), len(FADE) - 2); f = t - i
+    a, b = (tuple(int(c[k:k + 2], 16) for k in (1, 3, 5)) for c in (FADE[i], FADE[i + 1]))
+    return '#%02X%02X%02X' % tuple(round((x + (y - x) * f) * dim) for x, y in zip(a, b))
+
+
+def fade_rrect(cv, x0, y0, x1, y1, r, dim=1.0):
+    """The fade, left to right, inside a rounded rectangle: one line per pixel column, cut to the corners' arcs"""
+    r = max(1.0, min(r, (x1 - x0) / 2, (y1 - y0) / 2)); w = max(1, x1 - x0)
+    for x in range(int(x0), int(x1) + 1):
+        dx = max(0.0, (x0 + r) - x, x - (x1 - r))
+        dy = r - max(0.0, r * r - dx * dx) ** 0.5 if dx else 0.0
+        if y0 + dy < y1 - dy: cv.create_line(x, y0 + dy, x, y1 - dy + 1, fill=fade_at((x - x0) / w, dim))
+
+
 def label(parent, text='', size=11, bold=False, fg=None, wrap=True, **kw):
     """A label on its parent's colour; wrap=True folds it to the width it is packed to"""
     lb = tk.Label(parent, text=text, font=F(size, bold), fg=fg or C['text'], bg=parent['bg'], justify='left', anchor='w', **kw)
@@ -199,7 +216,7 @@ class Round(tk.Canvas):
     """A rounded panel: widgets go in .body. It takes the width it is packed to and the height its body asks for"""
     def __init__(self, parent, fill=None, edge=None, pad=12, radius=16, command=None):
         super().__init__(parent, bg=parent['bg'], highlightthickness=0, bd=0, height=2 * pad)
-        self.fill, self.edge, self.pad, self.radius, self.command = fill or C['card'], edge, pad, radius, command
+        self.fill, self.edge, self.pad, self.radius, self.command = fill or C['card'], edge or (C['edge'] if (fill or C['card']) == C['card'] else None), pad, radius, command
         self.body = tk.Frame(self, bg=self.fill)
         self.item = self.create_window(pad, pad, window=self.body, anchor='nw')
         self.body.bind('<Configure>', self.fit); self.bind('<Configure>', self.fit)
@@ -220,7 +237,7 @@ class Round(tk.Canvas):
 
 
 class Pill(tk.Canvas):
-    """A rounded button: kind 'primary' (yellow, the one thing to do next) or 'plain' (lavender)"""
+    """A rounded button: kind 'primary' (the fade, the one thing to do next) or 'plain' (lavender)"""
     def __init__(self, parent, text, command, kind='plain', size=11):
         self.font = tkfont.Font(font=F(size, kind == 'primary'))
         w, h = self.font.measure(text) + 40, self.font.metrics('linespace') + 16
@@ -235,11 +252,13 @@ class Pill(tk.Canvas):
     def set_enabled(self, on): self.enabled = on; self.configure(cursor='hand2' if on else 'arrow'); self.draw()
 
     def draw(self):
-        if not self.enabled: fill, fg = C['pill'], C['edge']
-        elif self.kind == 'primary': fill, fg = C['sel_hi'] if self.hover else C['sel'], C['seltext']
-        else: fill, fg = C['pill_hi'] if self.hover else C['pill'], C['title']
         w, h = int(self.cget('width')), int(self.cget('height'))
-        self.delete('all'); rrect(self, 0, 0, w - 1, h - 1, h / 2, fill=fill, outline=fill)
+        self.delete('all')
+        if self.enabled and self.kind == 'primary':
+            fade_rrect(self, 0, 0, w - 1, h - 1, h / 2, 0.88 if self.hover else 1.0); fg = C['seltext']
+        else:
+            fill, fg = (C['pill'], C['soft']) if not self.enabled else (C['pill_hi'] if self.hover else C['pill'], C['title'])
+            rrect(self, 0, 0, w - 1, h - 1, h / 2, fill=fill, outline=fill)
         self.create_text(w / 2, h / 2, text=self.text, font=self.font, fill=fg)
 
 
@@ -329,12 +348,12 @@ class App(tk.Tk):
     def build_ui(self, parent):
         s = self.settings
         pad = {'padx': 8, 'pady': 4}
-        back = ttk.Label(parent, text='← Back to the walkthrough', foreground='#2f6fde', cursor='hand2', font=('', 10, 'underline'))
+        back = ttk.Label(parent, text='← Back to the walkthrough', foreground=C['link'], cursor='hand2', font=('', 10, 'underline'))
         back.pack(anchor='w', padx=18, pady=(10, 0)); back.bind('<Button-1>', lambda e: self.show_walk())
         f = ttk.Frame(parent); f.pack(fill='both', expand=True, padx=10, pady=10)
 
         ttk.Label(f, text='1. Your game dump', font=('', 12, 'bold')).grid(row=0, column=0, sticky='w', **pad)
-        help_link = ttk.Label(f, text='Need help? Ask on Discord', foreground='#2f6fde', cursor='hand2', font=('', 10, 'underline'))
+        help_link = ttk.Label(f, text='Need help? Ask on Discord', foreground=C['link'], cursor='hand2', font=('', 10, 'underline'))
         help_link.grid(row=0, column=2, sticky='e', **pad); help_link.bind('<Button-1>', lambda e: webbrowser.open(DISCORD))
         self.dump = tk.StringVar(value=s.get('dump', ''))
         ttk.Entry(f, textvariable=self.dump, width=70).grid(row=1, column=0, columnspan=2, sticky='ew', **pad)
@@ -714,7 +733,7 @@ class App(tk.Tk):
         r = self.card(parent)
         row = tk.Frame(r.body, bg=r.fill); row.pack(fill='x')
         num = tk.Canvas(row, width=26, height=26, bg=r.fill, highlightthickness=0); num.pack(side='left', anchor='n', padx=(0, 12), pady=2)
-        num.create_oval(1, 1, 25, 25, fill=C['title'], outline=C['title']); num.create_text(13, 13, text=str(n), font=F(10, True), fill='#FFFFFF')
+        num.create_oval(1, 1, 25, 25, fill=C['sel'], outline=C['sel']); num.create_text(13, 13, text=str(n), font=F(10, True), fill='#FFFFFF')
         side = tk.Frame(row, bg=r.fill); side.pack(side='right', anchor='n', padx=(12, 0))
         for text_, cmd, kind in buttons: Pill(side, text_, cmd, kind).pack(anchor='e', pady=(0, 6))
         col = tk.Frame(row, bg=r.fill); col.pack(side='left', fill='x', expand=True)
@@ -1074,7 +1093,7 @@ class App(tk.Tk):
             r.pack(fill='x', pady=3)
             top = tk.Frame(r.body, bg=r.fill); top.pack(fill='x')
             label(top, name, 11, st == 'run', C['title'] if st == 'run' else C['text'], wrap=False).pack(side='left')
-            text, fg = {'done': ('✓ done', C['ok']), 'run': (f'{round(p["pct"] * 100)}%' if p['pct'] is not None else 'working…', C['seltext']),
+            text, fg = {'done': ('✓ done', C['ok']), 'run': (f'{round(p["pct"] * 100)}%' if p['pct'] is not None else 'working…', C['accent']),
                         'wait': ('waiting', C['soft'])}[st]
             tk.Label(top, text=text, font=F(11, st == 'done'), fg=fg, bg=r.fill).pack(side='right')
             if st == 'run':
@@ -1090,7 +1109,7 @@ class App(tk.Tk):
         pct = self.prog['pct']
         if pct is not None: x0, x1 = 0, max(8, (w - 1) * pct)
         else: x = (time.time() * 140) % (w + 160) - 160; x0, x1 = max(0, x), min(w - 1, x + 160)
-        if x1 - x0 >= 8: rrect(b, x0, 0, x1, 7, 4, fill=C['sel'], outline=C['sel'])
+        if x1 - x0 >= 8: fade_rrect(b, x0, 0, x1, 7, 4)
 
     def prog_done(self, rc):
         p = self.prog
