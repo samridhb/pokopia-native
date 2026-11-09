@@ -65,6 +65,10 @@ bought; without it, the game has none.
   only what any web request carries: your internet address reaching GitHub, and a line naming Pokopia Native and its version. Nothing
   about you, your game, your save or your computer is sent. Turn it off in the builder (**Advanced** → **Check for updates once a day**),
   in the launcher's settings, or with `nxs2.py update --off`; the choice is kept in `updates.json` in your settings folder.
+  - **The Android app (beta)** asks, at most once a day when it starts, for the list of releases
+    (`api.github.com/repos/xFractals/pokopia-native/releases?per_page=30`) to find the newest Android beta. Again, only what any web request
+    carries is sent. Turn it off in the app's settings (**Back** → **Check for updates**); the choice is kept in `updates.json` among the
+    app's own files. The app has Android's internet permission for this, and for Link Play on Android later.
 - **Download and update.** Only when you press it, the builder downloads the new release's file for your computer from GitHub, checks
   its SHA-256 against the release's, and unpacks it beside the old download. Nothing is installed or run without that click.
 - **Link Play** connects only to the players you choose to play with (or a relay you set up yourself), and automatic port forwarding
