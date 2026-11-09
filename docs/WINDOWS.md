@@ -143,6 +143,10 @@ folder: Windows saves load on the Mac and the iPhone. [Saves](SAVES.md) has more
 
 ### Updating
 
+The builder tells you when a new version is out (it asks GitHub once a day; **Advanced** turns that off). **Download and update**
+on its first page does the steps below for you: it downloads the new release beside this one, checks it, and opens the new builder,
+which runs **Update my game**. By hand:
+
 1. Download the new [Pokopia-Native-for-Windows.zip](https://github.com/xFractals/pokopia-native/releases/latest/download/Pokopia-Native-for-Windows.zip)
    and unzip it into a new folder.
 2. Double-click **Pokopia Native Builder.cmd** in it. It offers **Update my game**: it checks your PC, runs Setup and

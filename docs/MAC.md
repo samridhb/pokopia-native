@@ -241,7 +241,8 @@ command; it only repacks the apps.
 
 ## Updating
 
-Your build folder, the shaders you have recorded and your save all carry over.
+Your build folder, the shaders you have recorded and your save all carry over. The builder tells you when a new version is out (it
+asks GitHub once a day; **Advanced** turns that off), and **Download and update** on its first page does steps 1 and 2 for you. By hand:
 
 1. Download the new version ([Get the download](#get-the-download)) and unzip it into a new folder.
 2. Open **Pokopia Native Builder** from the new folder. It offers **Update my game**: it checks your Mac, runs Setup and builds again into the

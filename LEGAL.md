@@ -58,6 +58,18 @@ tool cannot read it and will not try.
 It never makes, downloads or unlocks DLC (add-on content). The game sees DLC only when you give the builder your own dump of DLC you
 bought; without it, the game has none.
 
+## What it connects to
+
+- **The update check.** At most once a day, the builder and the game's launchers ask GitHub's public API for this project's latest
+  release (`api.github.com/repos/xFractals/pokopia-native/releases/latest`), to tell you when a new version is out. The request carries
+  only what any web request carries: your internet address reaching GitHub, and a line naming Pokopia Native and its version. Nothing
+  about you, your game, your save or your computer is sent. Turn it off in the builder (**Advanced** → **Check for updates once a day**),
+  in the launcher's settings, or with `nxs2.py update --off`; the choice is kept in `updates.json` in your settings folder.
+- **Download and update.** Only when you press it, the builder downloads the new release's file for your computer from GitHub, checks
+  its SHA-256 against the release's, and unpacks it beside the old download. Nothing is installed or run without that click.
+- **Link Play** connects only to the players you choose to play with (or a relay you set up yourself), and automatic port forwarding
+  talks only to your own router. There is no Pokopia Native server.
+
 ## Free, forever
 
 Pokopia Native is free of charge, and will stay free forever. The project never charges players for anything related to it: not the

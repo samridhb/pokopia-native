@@ -22,6 +22,7 @@ games on Apple systems, with this project's Switch 2 changes), the game's shader
   nxs2.py status <build dir>                what the build folder holds and what it still lacks
   nxs2.py import-save <build dir> <folder>  Windows and Linux: a save from the phone, a Mac or another PC (a folder with B00, G00, S00) becomes the one the game plays
   nxs2.py import-dlc <build dir> <folder>   Windows and Linux: your own DLC, the folder your dumping tool made from add-on content you bought
+  nxs2.py update [--force] [--download] [--off|--on]   is a newer Pokopia Native out (asks GitHub, at most once a day; --off turns it off)
 
 Needs: a Mac with Apple silicon, Xcode (27.x) with its command line tools (an iPhone build also needs the iOS
 platform), Python 3.12 or newer with capstone (5.x), lz4 and fontTools, the .NET 10 runtime (the shader
@@ -1505,6 +1506,140 @@ def import_dlc(args):
     say(f'your DLC {n}: {len(files)} file(s) from {src} -> {dst}. The game owns it from its next start. It is yours: never share it.')
 
 
+# ---------------------------------------------------------------- the update check (LEGAL.md: "The update check")
+# One request to GitHub's API for the latest release, at most once a day: no cookies, no identifiers, nothing about the player, the game or
+# the computer. The builder, the launchers and the apps share updates.json and its rules (the off switch, the skipped version).
+RELEASES_API = 'https://api.github.com/repos/xFractals/pokopia-native/releases/latest'
+UPDATE_EVERY = 24 * 3600
+
+
+def settings_root():   # where the launchers keep their settings on this computer
+    if os.environ.get('POKOPIA_SETTINGS_DIR'): return pathlib.Path(os.environ['POKOPIA_SETTINGS_DIR'])
+    if WIN: return pathlib.Path(os.environ.get('LOCALAPPDATA') or pathlib.Path.home() / 'AppData/Local') / 'Pokopia Native'
+    if sys.platform == 'darwin': return pathlib.Path.home() / 'Library/Application Support/Pokopia Native'
+    return pathlib.Path(os.environ.get('XDG_DATA_HOME') or pathlib.Path.home() / '.local/share') / 'pokopia-native'
+
+
+def version_of(tag):
+    m = re.match(r'^v?(\d+)\.(\d+)\.(\d+)$', (tag or '').strip())
+    return tuple(int(x) for x in m.groups()) if m else None
+
+
+def update_state(**change):
+    """updates.json: read, and with keyword arguments also written back (check=False is the off switch, skipped=<tag> skips one)"""
+    p = settings_root() / 'updates.json'
+    try: s = json.loads(p.read_text(encoding='utf-8'))
+    except Exception: s = {}
+    if change:
+        s.update(change)
+        try: p.parent.mkdir(parents=True, exist_ok=True); p.write_text(json.dumps(s, indent=1) + '\n', encoding='utf-8')
+        except OSError: pass
+    return s
+
+
+def update_check(force=False, timeout=3.0):
+    """The newest release when it is newer than this download and not skipped: {'tag', 'name', 'url', 'assets', 'sums'}; else None (also when
+    the check is off, offline, or done less than a day ago with nothing newer). Never raises."""
+    import datetime, urllib.request
+    s = update_state()
+    if s.get('check') is False: return None
+    try: last = datetime.datetime.strptime(s.get('last_check', ''), '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=datetime.timezone.utc).timestamp()
+    except ValueError: last = 0
+    if force or time.time() - last >= UPDATE_EVERY:
+        try:
+            req = urllib.request.Request(RELEASES_API, headers={'Accept': 'application/vnd.github+json',
+                                                                'User-Agent': f'pokopia-native-update-check/{TOOL_VERSION}'})
+            with urllib.request.urlopen(req, timeout=timeout) as r: rel = json.load(r)
+            if rel.get('draft') or rel.get('prerelease') or not version_of(rel.get('tag_name')): raise ValueError('not a stable release')
+            body = rel.get('body') or ''
+            sums = {n: h.lower() for h, n in re.findall(r'^([0-9a-fA-F]{64})\s+\*?(\S+)\s*$', body, re.M)}
+            s = update_state(last_check=time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), latest=rel['tag_name'],
+                             latest_name=(rel.get('name') or rel['tag_name']).split(': ', 1)[-1], latest_url=rel.get('html_url', ''),
+                             assets=[{'name': a['name'], 'size': a.get('size', 0), 'url': a['browser_download_url'],
+                                      'sha256': (a.get('digest') or '').split('sha256:', 1)[-1].lower() or sums.get(a['name'], '')}
+                                     for a in rel.get('assets', [])])
+        except Exception:
+            pass   # offline, rate-limited or anything else: nothing shown, and the next start tries again
+    tag = s.get('latest')
+    if not tag or tag == s.get('skipped') or not version_of(tag) or not version_of(TOOL_VERSION) or version_of(tag) <= version_of(TOOL_VERSION):
+        return None
+    return {'tag': tag, 'name': s.get('latest_name', tag), 'url': s.get('latest_url', ''), 'assets': s.get('assets', [])}
+
+
+def update_asset(info):   # this download's counterpart in the new release
+    names = {a['name']: a for a in info['assets']}
+    if WIN: return names.get('Pokopia-Native-for-Windows.zip')
+    if sys.platform == 'darwin': return names.get('Pokopia-Native-for-Mac.zip')
+    if os.environ.get('APPIMAGE'): return next((a for n, a in names.items() if n.endswith('-x86_64.AppImage')), None)
+    return names.get('Pokopia-Native-for-Linux.zip')
+
+
+def download_update(info, progress=None):
+    """Downloads this download's counterpart in the new release beside it, checks its SHA-256 against the release's, and unpacks it.
+    Returns the new builder: the AppImage, else the new download's folder. The old download is left as it is."""
+    import hashlib as hl, tempfile, urllib.request, zipfile
+    a = update_asset(info)
+    if not a: raise Fail(f'{info["tag"]} has no download for this computer: get it from {info["url"]}')
+    if not re.fullmatch(r'[0-9a-f]{64}', a.get('sha256', '')): raise Fail(f'{info["tag"]}: no checksum for {a["name"]}, so it is not downloaded here: get it from {info["url"]}')
+    appimage = os.environ.get('APPIMAGE')
+    dest = pathlib.Path(appimage).parent if appimage and a['name'].endswith('.AppImage') else HERE.parent
+    fd, tmp = tempfile.mkstemp(prefix='pokopia-update-', suffix='.part', dir=dest); os.close(fd); tmp = pathlib.Path(tmp)
+    try:
+        h, got, size = hl.sha256(), 0, a.get('size') or 0
+        req = urllib.request.Request(a['url'], headers={'User-Agent': f'pokopia-native-update/{TOOL_VERSION}'})
+        with urllib.request.urlopen(req, timeout=30) as r, open(tmp, 'wb') as f:
+            while chunk := r.read(1 << 20):
+                f.write(chunk); h.update(chunk); got += len(chunk)
+                if progress and size: progress(min(99, got * 100 // size))
+        if h.hexdigest() != a['sha256']: raise Fail(f'{a["name"]}: the download does not match the release\'s checksum; nothing was changed')
+        if a['name'].endswith('.AppImage'):
+            out = dest / a['name']
+            if out.exists() and out != pathlib.Path(appimage or ''): out.unlink()
+            tmp.replace(out); out.chmod(0o755); return out
+        with zipfile.ZipFile(tmp) as z:
+            top = z.namelist()[0].split('/')[0]
+            out = dest / top
+            if (out / 'nxs2.py').is_file():
+                m = re.search(r"^TOOL_VERSION = '([^']+)'", (out / 'nxs2.py').read_text(encoding='utf-8'), re.M)
+                if m and version_of(m.group(1)) == version_of(info['tag']): return out   # unpacked before
+                out = dest / f'{top}-{time.strftime("%Y%m%d-%H%M%S")}'
+            if sys.platform == 'darwin':   # ditto keeps the app's permissions and links
+                stage = pathlib.Path(tempfile.mkdtemp(prefix='pokopia-update-', dir=dest))
+                subprocess.run(['ditto', '-x', '-k', str(tmp), str(stage)], check=True); (stage / top).rename(out); shutil.rmtree(stage, ignore_errors=True)
+            else:
+                stage = pathlib.Path(tempfile.mkdtemp(prefix='pokopia-update-', dir=dest))
+                for i in z.infolist():
+                    z.extract(i, stage)
+                    mode = (i.external_attr >> 16) & 0o777
+                    if mode and not WIN: (stage / i.filename).chmod(mode)
+                (stage / top).rename(out); shutil.rmtree(stage, ignore_errors=True)
+        if progress: progress(100)
+        return out
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def open_builder(path, update_build=None):
+    """Starts a builder: an AppImage, or a download's folder with this Python. update_build: run Update my game on that build folder."""
+    path = pathlib.Path(path); more = ['--update', str(update_build)] if update_build else []
+    if path.is_file(): return subprocess.Popen([str(path)] + more, close_fds=True)
+    exe = sys.executable
+    if WIN and exe.lower().endswith('python.exe') and pathlib.Path(exe[:-10] + 'pythonw.exe').is_file(): exe = exe[:-10] + 'pythonw.exe'
+    return subprocess.Popen([exe, str(path / 'nxs2_gui.py')] + more, cwd=path, close_fds=True)
+
+
+def update_cmd(args):
+    if args.off or args.on:
+        update_state(check=bool(args.on)); return say(f'update check: {"on, once a day" if args.on else "off"}')
+    info = update_check(force=args.force)
+    if args.json: return print(json.dumps(info or {}))
+    if not info: return say(f'update: none newer than {TOOL_VERSION}' + (' (the check is off)' if update_state().get('check') is False else ''))
+    say(f'update: {info["tag"]} is out ({info["name"]}): {info["url"]}')
+    if args.download:
+        out = download_update(info, progress=lambda p: say(f'download: {p}%'))
+        say(f'the new builder: {out}')
+
+
 def run_windows(args):
     b = Build(args.build); cmd = b.outputs / f'Play Pokopia {b.version}.cmd'
     if not cmd.is_file(): raise Fail(f'{b.out} has no Windows game yet: nxs2.py build <dump> --windows')
@@ -1810,6 +1945,11 @@ def main():
     s.add_argument('--method', default='debugging', help='Xcode export method: debugging (default), ad-hoc, release-testing')
     s.add_argument('--p12', help='without Xcode: your Apple Development certificate and key (.p12)'); s.add_argument('--profile', help='without Xcode: the development provisioning profile (.mobileprovision)')
     s.add_argument('--password-stdin', action='store_true', help='read the .p12 password from the first line of stdin (the window passes it so)'); s.set_defaults(f=sign)
+    s = sub.add_parser('update', help='is a newer Pokopia Native out? (asks GitHub; at most once a day unless --force)')
+    s.add_argument('--force', action='store_true', help='ask now, even if checked today'); s.add_argument('--json', action='store_true')
+    s.add_argument('--download', action='store_true', help='download the new release beside this one and unpack it (its checksum is checked)')
+    s.add_argument('--off', action='store_true', help='turn the daily check off'); s.add_argument('--on', action='store_true', help='turn it on again')
+    s.set_defaults(f=update_cmd)
     s = sub.add_parser('status'); s.add_argument('build'); s.set_defaults(f=status)
     s = sub.add_parser('icon', help='the apps\' icon from the title screen: your own game on a Mac, or a picture of it')
     s.add_argument('build'); s.add_argument('picture', nargs='?', help='a 16:9 screenshot of the title screen (your Switch 2\'s Capture button), or a square icon')

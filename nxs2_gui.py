@@ -309,7 +309,7 @@ def fix_text(hints):
 
 
 class App(tk.Tk):
-    def __init__(self):
+    def __init__(self, update_build=None):
         super().__init__()
         self.title(f'Pokopia Native Builder {tool_version()}')
         if LINUX:
@@ -326,9 +326,17 @@ class App(tk.Tk):
         self.adv = tk.Frame(self); self.build_ui(self.adv)   # Advanced: the one-screen view; its variables are the walkthrough's too
         self.walk = tk.Frame(self, bg=C['bg']); self.build_walk()
         self.walk.pack(fill='both', expand=True)
+        self.update_info, self.on_home, self.updating, self.uq = None, False, False, queue.Queue()
+        if update_build and pathlib.Path(update_build).is_dir(): self.out.set(update_build)   # opened by the old builder's Download and update
         self.after(100, self.poll)
         self.check_setup()
         self.home()
+        try:
+            import nxs2; self.upd_on.set(nxs2.update_state().get('check') is not False)
+        except Exception: pass
+        if not os.environ.get('NXS2_GUI_SHOT'): threading.Thread(target=self.check_updates, daemon=True).start()
+        self.after(300, self.poll_updates)
+        if update_build and self.settings.get('built'): self.after(700, lambda: self.p_check(then=self.start_build))
 
     # ---------------------------------------------------------------- settings
     def load_settings(self):
@@ -389,9 +397,14 @@ class App(tk.Tk):
             ttk.Checkbutton(o, text='Mac only (skip the iPhone shader libraries, faster)', variable=self.no_ios).pack(side='left')
 
         sp = ttk.Frame(f); sp.grid(row=8, column=0, columnspan=3, sticky='w', padx=8, pady=(6, 0))
-        ttk.Checkbutton(sp, text='Full speed (every CPU thread)', variable=self.full_speed).pack(side='left')
-        ttk.Label(sp, text='  Off: a few cores at low priority, slower but the computer stays cool and usable.' if not MAC else
+        l1 = ttk.Frame(sp); l1.pack(fill='x')
+        ttk.Checkbutton(l1, text='Full speed (every CPU thread)', variable=self.full_speed).pack(side='left')
+        ttk.Label(l1, text='  Off: a few cores at low priority, slower but the computer stays cool and usable.' if not MAC else
                   '  Off: all cores at low priority. On: the same at normal priority.', foreground='#666').pack(side='left')
+        l2 = ttk.Frame(sp); l2.pack(fill='x', pady=(4, 0))
+        self.upd_on = tk.BooleanVar(value=True)
+        ttk.Checkbutton(l2, text='Check for updates once a day', variable=self.upd_on, command=self.set_update_check).pack(side='left')
+        ttk.Label(l2, text='  It asks GitHub for the newest version, and nothing else is sent.', foreground='#666').pack(side='left')
 
         b = ttk.Frame(f); b.grid(row=9, column=0, columnspan=3, sticky='ew', padx=8, pady=(10, 4))
         self.buttons = {}
@@ -417,6 +430,81 @@ class App(tk.Tk):
         sb = ttk.Scrollbar(f, orient='vertical', command=self.log.yview); sb.grid(row=12, column=3, sticky='ns'); self.log['yscrollcommand'] = sb.set
         f.columnconfigure(0, weight=1); f.rowconfigure(12, weight=1)
         self.protocol('WM_DELETE_WINDOW', self.on_close)
+
+    # ---------------------------------------------------------------- updates (nxs2.py's check: updates.json, at most once a day)
+    def check_updates(self):
+        try:
+            import nxs2; self.uq.put(('info', nxs2.update_check()))
+        except Exception as e: log_line(f'update check: {e}')
+
+    def poll_updates(self):
+        try:
+            while True:
+                kind, v = self.uq.get_nowait()
+                if kind == 'info':
+                    self.update_info = v
+                    if v and self.on_home and not self.proc: self.home()
+                elif kind == 'pct': self.prog = {'pct': v / 100}
+                elif kind == 'done': self.update_ready(v)
+                elif kind == 'fail': self.update_failed(v)
+        except queue.Empty: pass
+        if self.updating: self.draw_bar()
+        self.after(60 if self.updating else 250, self.poll_updates)
+
+    def set_update_check(self):
+        import nxs2; nxs2.update_state(check=bool(self.upd_on.get()))
+        if not self.upd_on.get() and self.update_info: self.update_info = None; self.on_home and not self.proc and self.home()
+
+    def update_card(self, pg):   # on the Welcome pages, when a newer release is out
+        u = self.update_info
+        if not u: return
+        r = self.card(pg, C['light'], C['sel'])
+        label(r.body, f'Pokopia Native {u["tag"].lstrip("v")} is out', 13, True, C['title']).pack(fill='x')
+        label(r.body, f'{u["name"]}. Download and update gets it and runs Update my game for you: your save, your settings and the '
+                      'graphics you recorded stay.', 10).pack(fill='x', pady=(2, 8))
+        row = tk.Frame(r.body, bg=r.fill); row.pack(fill='x')
+        Pill(row, 'Download and update', self.do_update, 'primary', size=10).pack(side='left', padx=(0, 8))
+        Pill(row, "What's new", lambda: webbrowser.open(u['url']), size=10).pack(side='left', padx=(0, 8))
+        Pill(row, 'Later', self.update_later, size=10).pack(side='left', padx=(0, 8))
+        Pill(row, 'Skip this version', self.update_skip, size=10).pack(side='left')
+
+    def update_later(self): self.update_info = None; self.home()
+
+    def update_skip(self):
+        import nxs2; nxs2.update_state(skipped=self.update_info['tag']); self.update_info = None; self.home()
+
+    def do_update(self):
+        u = self.update_info
+        if not u or self.proc or self.updating: return
+        pg = self.page(None, f'Updating to Pokopia Native {u["tag"].lstrip("v")}', 'The new download goes beside this one and its checksum is '
+                       'checked. Then the new builder opens and updates your game, and this window closes.')
+        r = self.card(pg)
+        label(r.body, 'Downloading the new release', 12, True, C['title']).pack(fill='x')
+        self.bar = tk.Canvas(r.body, height=8, bg=r.fill, highlightthickness=0); self.bar.pack(fill='x', pady=(6, 0))
+        self.prog, self.updating = {'pct': None}, True
+
+        def work():
+            try:
+                import nxs2; self.uq.put(('done', str(nxs2.download_update(u, progress=lambda p: self.uq.put(('pct', p))))))
+            except Exception as e: self.uq.put(('fail', str(e)))
+        threading.Thread(target=work, daemon=True).start()
+
+    def update_ready(self, path):
+        import nxs2
+        self.updating = False
+        b = self.build_dir() if self.settings.get('built') else None
+        try: nxs2.open_builder(path, update_build=b)
+        except Exception as e: return self.update_failed(f'The new builder could not start ({e}). It is in {path}: open it from there.')
+        log_line(f'update: opened the new builder in {path}' + (f' to update {b}' if b else ''))
+        self.page(None, 'The new builder is opening', f'It is in {path}' + (', and it updates your game next.' if b else '.') + ' This window closes now.')
+        self.after(2500, self.destroy)
+
+    def update_failed(self, msg):
+        self.updating = False
+        u = self.update_info or {}
+        self.page(None, 'The update did not finish', f'{msg} Nothing of your game changed.')
+        if u.get('url'): self.navb(back=self.home, nxt=lambda: webbrowser.open(u['url']), text='Download it from GitHub')
+        else: self.navb(back=self.home)
 
     # ---------------------------------------------------------------- helpers
     def choose_dump(self):
@@ -695,7 +783,7 @@ class App(tk.Tk):
 
     def page(self, step, title, intro=''):
         """Empties the page and its buttons, marks the step along the top (None: no step) and returns the page to fill"""
-        self.wlog = self.bar = None
+        self.wlog = self.bar = None; self.on_home = False
         for c in self.pg.winfo_children() + self.nav.winfo_children() + self.dots.winfo_children(): c.destroy()
         self.cv.yview_moveto(0)
         for i, n in enumerate(STEPS if step is not None else ()):   # pages outside the first walk through (welcome back, refresh) have no steps
@@ -798,6 +886,7 @@ class App(tk.Tk):
         if not (built and b and b.is_dir()): return self.p_welcome()
         new = s.get('built_with') and s['built_with'] != tool_version()
         pg = self.page(None, 'Welcome back', f'Your build: {self.made_text(built)}' + (f', from Pokopia {s["game"]}.' if s.get('game') else '.'))
+        self.on_home = True; self.update_card(pg)
         if new:
             iphone = any(k in built for k in ('ipa', 'signed', 'xcode'))
             self.step_card(pg, 1, f'Update to {tool_version()}', f'Your game was built with {s["built_with"]}. Updating redoes only what changed, so it is much '
@@ -849,6 +938,7 @@ class App(tk.Tk):
     def p_welcome(self):
         pg = self.page(0, 'Welcome to Pokopia Native', f'This turns your own copy of Pokopia into a game that runs on your {PC}. It goes one step at a '
                        'time, and you can stop at any point: the next time you open it, it picks up where you left off.')
+        self.on_home = True; self.update_card(pg)
         r = self.card(pg)
         label(r.body, 'What you need', 12, True, C['title']).pack(fill='x')
         for t in ('The game files your dumping tool made from your own Switch 2 copy (game version 2.0.1 or 1.0.5)', 'About 15 GB of free space',
@@ -1212,7 +1302,8 @@ if __name__ == '__main__':
     try:
         log_line(f'window: Python {sys.version.split()[0]}, Tk {tk.TkVersion}, pokopia-native {tool_version()}')
         if not NXS2.is_file(): raise FileNotFoundError(f'nxs2.py not found beside {__file__}: unzip the whole download and start the builder from that folder')
-        app = App()
+        upd = sys.argv[sys.argv.index('--update') + 1] if '--update' in sys.argv[1:-1] else None   # opened by Download and update
+        app = App(update_build=upd)
         app.report_callback_exception = lambda *e: report_crash('The window hit an error')
         if os.environ.get('NXS2_GUI_SHOT'):
             app.attributes('-topmost', True); app.lift(); app.focus_force()

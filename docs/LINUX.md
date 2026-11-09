@@ -38,6 +38,10 @@ The window draws with your desktop's fonts and dialogs (on a system older than 2
 that, start it with `POKOPIA_TK=x11`). To remove the builder, delete the AppImage and
 `~/.local/share/pokopia-native/builder`; your builds and saves are elsewhere and stay.
 
+**A new version:** the builder tells you when one is out (it asks GitHub once a day; **Advanced** turns that off). **Download and update**
+fetches the new AppImage beside the old one, checks it, and opens it to run **Update my game** on your build folder. The old AppImage can
+be deleted afterwards.
+
 Everything below is the same build without the AppImage, from the "for Linux" zip and a terminal.
 
 ## Arch Linux and CachyOS (a PC, or a Steam Deck running them)
