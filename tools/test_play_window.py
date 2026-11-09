@@ -196,6 +196,10 @@ class Window(unittest.TestCase):
         self.assertEqual((lp['mode'], lp['ask'], lp['interact'], lp['story']), ('host', True, False, False))
         self.assertEqual(disp, {'fps': 30, 'vsync': False, 'antialiasing': 'fxaa'})   # F1's other settings kept
 
+    def test_frame_rate_cap(self):
+        code, _, disp = self.run_window([45, 'play'], None, {})
+        self.assertEqual((code, disp), (pw.PLAY, {'fps': 45}))
+
     def test_cancel(self):
         code, lp, disp = self.run_window([])
         self.assertEqual((code, lp, disp), (pw.CANCELLED, None, None))

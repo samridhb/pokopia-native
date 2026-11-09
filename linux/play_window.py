@@ -5,7 +5,7 @@ update_check: once a day, 3 s, updates.json shared with the builder).
 It writes what play.sh's prompts wrote (linkplay.json, display.json in the settings folder); play.sh falls back to those prompts when no window
 can open here (exit 11: no display, or a Python without Tk).
     play_window.py launch --settings <folder> --installed <version> [--game-version <v>] [--coop-ok | --coop-needs <text> --coop-game <text>]
-                          [--no-save] [--console-default 0|1]       exit 0: play; 10: cancelled
+                          [--no-save] [--console-default 0|1] [--deck]   exit 0: play; 10: cancelled
     play_window.py notice --installed <version> [--quiet]          the once-a-day check (3 s at most); a newer release in a small window of
                                                                     its own, or with --quiet (or no window here) one line on stderr
 <version> is play.json's pokopia_native: the build's, which can be older than the builder that made it.
@@ -27,8 +27,10 @@ MODES = (('alone', 'Play alone', ''),
 PICTURE = (('console', 'Console mode', (('Docked', 1), ('Handheld', 0))),
            ('fullscreen', 'Display', (('Window', False), ('Full screen', True))),
            ('antialiasing', 'Anti-aliasing', (('Off', 'off'), ('FXAA', 'fxaa'), ('SMAA', 'smaa'))),
-           ('fps', 'Frame rate', (('60', 60), ('30', 30))),
+           ('fps', 'Frame rate', (('60', 60), ('50', 50), ('45', 45), ('40', 40), ('30', 30))),
            ('fps_counter', 'FPS counter', (('Off', 'off'), ('Corner', 'corner'), ('Detailed', 'detailed'))))
+FPS_HINT = '40 is even on a 120 Hz screen; 45 and 50 are smooth only with FreeSync or G-Sync.'
+FPS_HINT_DECK = 'Best on the Deck: 60 or 30 (its screen runs at 60 Hz).'
 CHECK_TEXT = 'Check for updates (once a day, asks GitHub for the latest version)'
 NOSAVE_TEXT = ('No save here yet, so the game starts a new one. To play your save from the phone, a Mac or another PC, cancel and run '
                'nxs2.py import-save first.')
@@ -209,9 +211,9 @@ def widgets(tk, g):
             super().__init__(parent, bg=parent['bg'])
             self.var, self.font, self.bold, self.chips = var, g.tkfont.Font(font=F(10)), g.tkfont.Font(font=F(10, True)), []
             for text, value in choices:
-                w, h = self.bold.measure(text) + 28, self.font.metrics('linespace') + 10
+                w, h = self.bold.measure(text) + 22, self.font.metrics('linespace') + 10
                 cv = tk.Canvas(self, width=w, height=h, bg=parent['bg'], highlightthickness=0, bd=0, cursor='hand2')
-                cv.pack(side='left', padx=(0, 6)); cv.bind('<Button-1>', lambda e, v=value: var.set(v))
+                cv.pack(side='left', padx=(0, 5)); cv.bind('<Button-1>', lambda e, v=value: var.set(v))
                 cv.bind('<Enter>', lambda e, c=cv: self.draw(c, True)); cv.bind('<Leave>', lambda e, c=cv: self.draw(c, False))
                 cv.text, cv.value = text, value; self.chips.append(cv)
             var.trace_add('write', lambda *a: [self.draw(c) for c in self.chips]); [self.draw(c) for c in self.chips]
@@ -272,7 +274,7 @@ def launch(a, look=None):
     pad = round(18 * g.SCALE)
 
     top = tk.Frame(root, bg=C['bg']); top.pack(fill='x', padx=pad, pady=(pad, 0))
-    g.label(top, 'Pokemon Pokopia', 20, True, fg=C['title'], wrap=False).pack(side='left')
+    g.label(top, 'Pokopia', 20, True, fg=C['title'], wrap=False).pack(side='left')
     sub = '  ·  '.join(x for x in (f'Pokopia Native {a.installed}' if a.installed else '', f'game {a.game_version}' if a.game_version else '') if x)
     g.label(top, sub, 10, fg=C['soft'], wrap=False).pack(side='left', padx=(14, 0), pady=(10, 0))
     tk.Frame(root, bg=C['edge'], height=2).pack(fill='x', padx=pad, pady=(10, 0))
@@ -327,7 +329,7 @@ def launch(a, look=None):
     right = tk.Frame(cols, bg=C['bg']); right.grid(row=0, column=1, sticky='nsew')
     pic = g.Round(right, pad=16, radius=16); pic.pack(fill='x')
     g.label(pic.body, 'The picture', 13, True, fg=C['title']).pack(fill='x')
-    g.label(pic.body, 'F1 in the game changes these and more while you play.', 10, fg=C['soft']).pack(fill='x', pady=(2, 4))
+    notes.append(g.label(pic.body, 'F1 in the game changes these and more while you play.', 10, fg=C['soft'])); notes[-1].pack(fill='x', pady=(2, 4))
     grid = tk.Frame(pic.body, bg=C['card']); grid.pack(fill='x'); grid.columnconfigure(1, weight=1)
     defaults = {'console': a.console_default, 'fullscreen': False, 'antialiasing': 'smaa', 'fps': 60, 'fps_counter': 'off'}
     shown, pvars = {}, {}
@@ -337,9 +339,11 @@ def launch(a, look=None):
         if v not in [c[1] for c in choices]: v = defaults[key]
         shown[key] = v
         pvars[key] = (tk.IntVar if key in ('console', 'fps') else tk.BooleanVar if key == 'fullscreen' else tk.StringVar)(value=v)
-        r = len(shown) - 1
+        r = grid.grid_size()[1]
         g.label(grid, title, 10, fg=C['text'], wrap=False).grid(row=r, column=0, sticky='w', padx=(0, 12), pady=(6, 0))
         Chips(grid, pvars[key], choices).grid(row=r, column=1, sticky='w', pady=(6, 0))
+        if key == 'fps':
+            g.label(grid, FPS_HINT_DECK if a.deck else FPS_HINT, 9, fg=C['soft']).grid(row=r + 1, column=1, sticky='ew', pady=(3, 0))   # kept on a short screen too
 
     opts = g.Round(right, pad=16, radius=16); opts.pack(fill='x', pady=(14, 0))
     again, check = tk.BooleanVar(value=pref.get('ask') is not False), tk.BooleanVar(value=checks)
@@ -395,7 +399,7 @@ def launch(a, look=None):
     root.protocol('WM_DELETE_WINDOW', root.destroy)
     width = round(980 * g.SCALE)
     if root.winfo_screenheight() < round(940 * g.SCALE):   # a short screen (the Steam Deck's 800, with room for the notice): no helper lines
-        for n in notes: n.grid_remove()
+        for n in notes: n.grid_remove() if n.winfo_manager() == 'grid' else n.pack_forget()
     place(root, width)
     root.minsize(round(760 * g.SCALE), round(420 * g.SCALE))
     if a.shot: shoot(root, a.shot)
@@ -464,6 +468,7 @@ def main(argv=None):
     la = sub.add_parser('launch'); la.add_argument('--settings', required=True); la.add_argument('--installed', default='')
     la.add_argument('--game-version', default=''); la.add_argument('--coop-ok', action='store_true'); la.add_argument('--coop-needs', default='')
     la.add_argument('--coop-game', default=''); la.add_argument('--no-save', action='store_true'); la.add_argument('--console-default', type=int, default=1)
+    la.add_argument('--deck', action='store_true')
     no = sub.add_parser('notice'); no.add_argument('--installed', required=True); no.add_argument('--quiet', action='store_true')
     ro = sub.add_parser('room'); ro.add_argument('code')
     for p in (la, no, ro): p.add_argument('--shot', default='')

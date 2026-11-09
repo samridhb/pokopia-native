@@ -123,7 +123,7 @@ start translates the shaders the game makes while it runs: for about a minute th
 
 **Updates:** once a day the game's launcher asks GitHub for the latest release's version (one request; nothing about you, the game or the
 computer is sent beyond what any web request carries). When a newer one is out it says so in its window, or in a small window of its own beside
-the game when the window is not shown (in Steam's Game Mode, or with `--silent`, only a line in the terminal). **Download** opens the release
+the game when the window is not shown (in Steam's Game Mode, only a line in the terminal). **Download** opens the release
 page; the builder's **Update my game** keeps your save and settings. **Check for updates** in the window turns it off for the launcher and the
 builder alike (it is `"check": false` in `~/.local/share/pokopia-native/updates.json`).
 
