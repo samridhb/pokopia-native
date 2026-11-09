@@ -442,7 +442,7 @@ index 9e28924..2a31677 100644
 -#define NVN_NFUNC 537
 +#define NVN_NFUNC 734
 diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
-index ac449a5..963418c 100644
+index ac449a5..717095f 100644
 --- a/dm/gfx/nvn/nvn_mtl.m
 +++ b/dm/gfx/nvn/nvn_mtl.m
 @@ -471,6 +471,7 @@ void mtl_init(void) {
@@ -465,7 +465,7 @@ index ac449a5..963418c 100644
      if (!mem_any(t->mem, t->L.size)) return 0;
      static uint64_t n; if (n++ < 4) MLOG("texture written by the CPU before its first use ser=%llu %ux%ux%u format %#x pool flags %#x: uploaded from its storage, re-uploaded when it changes (%llu so far)",
                                           (unsigned long long)t->serial, t->d.width, t->d.height, t->d.depth, t->d.format, t->pool->flags, (unsigned long long)n);
-@@ -4105,7 +4109,7 @@ static void draw_gs_check(NvProg *pr) {
+@@ -4105,7 +4109,7 @@ static __unsafe_unretained NvProg *prog_get(const prog_t *cp) {   // Called only
              MLOG("[RED] shader %s is not in the shader map (DM_NVN_SHDUMP=directory saves its control section and code area)", k.UTF8String);
              // DM_NVN_SHDUMP=directory: shaders missing from the map are saved as <key>.ctl (0x880-byte control section) and <key>.code (code area, length from control +0x704), to trace their source / add them to the map offline
              static const char *shd; static int shd_init; if (!shd_init) { shd = getenv("DM_NVN_SHDUMP"); shd_init = 1; }
@@ -522,6 +522,38 @@ index ac449a5..963418c 100644
      [b endEncoding]; [cb commit]; [cb waitUntilCompleted];
      FILE *f = fopen(path, "wb"); if (f) { fprintf(f, "%lu %lu %lu %lu", (unsigned long)w, (unsigned long)h, (unsigned long)t.pixelFormat, (unsigned long)row); if (ns > 1) fprintf(f, " %lu", (unsigned long)ns); fputc('\n', f); fwrite(buf.contents, 1, sz * ns, f); fclose(f); }
      const uint8_t *p = buf.contents;
+@@ -11258,17 +11275,27 @@ static int present_encode(id<MTLCommandBuffer> cb, id<MTLTexture> src, id<MTLTex
+ typedef struct { id<MTL4FXSpatialScaler> sc; id<MTLTexture> in, out; uint64_t made_at; int made; NSUInteger refused[6]; } fx_state;
+ static fx_state g_fx_present;   // only the present thread encodes or replaces the scaler
+ static id<MTL4Compiler> g_fx_comp;
+-static int g_fx_mode = -1;   // 1 = metalfx, 0 = off
++static _Atomic int g_fx_mode = -1;   // 1 = metalfx, 0 = off
++static _Atomic int g_fx_want = -1;   // the in-game Settings window's choice (dm_present_upscale_set), which replaces DM_PRESENT_UPSCALE's; -1 none
+ static int fx_mode(void) {
+     if (g_fx_mode >= 0) return g_fx_mode;
+-    const char *e = getenv("DM_PRESENT_UPSCALE"); int v = 0;
+-    if (e && (!strcmp(e, "metalfx") || !strcmp(e, "1"))) v = 1;
++    const char *e = getenv("DM_PRESENT_UPSCALE"); int v = 0, want = g_fx_want;
++    if (want >= 0) v = want;
++    else if (e && (!strcmp(e, "metalfx") || !strcmp(e, "1"))) v = 1;
+     else if (e && (!strcmp(e, "off") || !strcmp(e, "0"))) v = 0;
+     else if (e && *e) MLOG("[RED] DM_PRESENT_UPSCALE=%s: metalfx or off; keeping %s", e, v ? "metalfx" : "off");
+     if (v && !(g_q4 && [MTLFXSpatialScalerDescriptor supportsMetal4FX:g_dev])) { MLOG("present upscaling: this GPU has no Metal 4 MetalFX spatial scaler; the present scales bilinearly"); v = 0; }
+-    MLOG("present upscaling (DM_PRESENT_UPSCALE): %s", v ? "metalfx, MetalFX's spatial scaler where the picture is shown larger than the game renders it" : "off, bilinear");
++    MLOG("present upscaling (%s): %s", want >= 0 ? "the Settings window" : "DM_PRESENT_UPSCALE", v ? "metalfx, MetalFX's spatial scaler where the picture is shown larger than the game renders it" : "off, bilinear");
+     return g_fx_mode = v;
+ }
++// The in-game Settings window (Mac controls_mac.m, iOS): the choice takes effect at the next present, checked against the GPU as at start
++void dm_present_upscale_set(int on) { g_fx_want = on ? 1 : 0; g_fx_mode = -1; }
++int dm_present_upscale_get(int *supported) {
++    if (supported) *supported = g_dev ? (g_q4 && [MTLFXSpatialScalerDescriptor supportsMetal4FX:g_dev]) : -1;
++    int m = g_fx_mode, want = g_fx_want; if (m >= 0) return m;
++    if (want >= 0) return want;
++    const char *e = getenv("DM_PRESENT_UPSCALE"); return e && (!strcmp(e, "metalfx") || !strcmp(e, "1"));
++}
+ // MetalFX scales the content (cw x ch) to its rectangle on the canvas (vp) when the rectangle is at least as large in both directions and larger in one
+ static int fx_wanted(MTLViewport vp, NSUInteger cw, NSUInteger ch) {
+     NSUInteger w = (NSUInteger)vp.width, h = (NSUInteger)vp.height;
 diff --git a/dm/gfx/nvn/nvn_protos.h b/dm/gfx/nvn/nvn_protos.h
 index 782482a..f7a8047 100644
 --- a/dm/gfx/nvn/nvn_protos.h
@@ -3871,18 +3903,736 @@ index 51f2706..32e5148 100644
              return Enum.TryParse(f, true, out TextureFormat tf) ? tf : TextureFormat.R8G8B8A8Unorm;
          }
 diff --git a/dm/host/Makefile b/dm/host/Makefile
-index 54afe1a..21162d4 100644
+index 54afe1a..11541ca 100644
 --- a/dm/host/Makefile
 +++ b/dm/host/Makefile
-@@ -64,7 +64,7 @@ endif
+@@ -17,7 +17,7 @@ GAME_H = gen/$(GAME)/game_profile.h
+ include ../mac/min_os.mk
+ CFLAGS=-O1 -g -Wall -Wno-unused-function -mmacosx-version-min=$(MACOS_MIN)
+ # Service-layer takeover hle_*.c files are included by wildcard: adding a file does not touch this line (avoids merge conflicts)
+-SRC=main.c loader.c hle.c crash.c probe.c thread.c save_sync.c memstat.m haptics_apple.m $(sort $(wildcard hle_*.c)) front_mac.m entry.S
++SRC=main.c loader.c hle.c crash.c probe.c thread.c save_sync.c memstat.m haptics_apple.m $(sort $(wildcard hle_*.c)) front_mac.m controls_mac.m entry.S
+ # NVN null device + nn::vi + the Vulkan layer (dm/gfx/)
+ # Sources under dm/gfx, dm/gfx/nvn, dm/gfx/tex, dm/gfx/vk and dm/gfx/gl are included by wildcard (tests/ and metal/ do not go into the host): adding a file does not touch this line
+ GFX=$(sort $(wildcard ../gfx/*.c ../gfx/nvn/*.c ../gfx/nvn/*.m ../gfx/nvn/*.S ../gfx/tex/*.c ../gfx/tex/*.m ../gfx/vk/*.m ../gfx/gl/*.m))
+@@ -63,8 +63,8 @@ endif
+ endif
  .PHONY: FORCE
  FORCE:
- dmhost: $(SRC) $(GFX) ../third_party/stb_vorbis/stb_vorbis.c dm.h hle.h romfs_image.h save_sync.h dm_input.h pad_slots.h hle_haptics.h haptics_apple.h motion_fusion.h motion_apple.h motion_pro.h motion_pro_mac.h pad_apple.h pad_hid.h pad_hid_mac.h front.h $(GFX_H) $(GAME_H) $(GAME_STAMP) $(VPX_LIB) $(MSL_H)
+-dmhost: $(SRC) $(GFX) ../third_party/stb_vorbis/stb_vorbis.c dm.h hle.h romfs_image.h save_sync.h dm_input.h pad_slots.h hle_haptics.h haptics_apple.h motion_fusion.h motion_apple.h motion_pro.h motion_pro_mac.h pad_apple.h pad_hid.h pad_hid_mac.h front.h $(GFX_H) $(GAME_H) $(GAME_STAMP) $(VPX_LIB) $(MSL_H)
 -	clang $(CFLAGS) -I../gfx/nvn/include -I$(dir $(MSL_H)) -I../third_party/vulkan-headers/include -I$(dir $(GAME_H)) -I$(VPX) -I../third_party/stb_vorbis -fobjc-arc -o $@ $(SRC) $(GFX) $(VPX_LIB) -framework Cocoa -framework QuartzCore -framework Metal -framework MetalFX -framework GameController -framework CoreHaptics -framework IOKit -framework AudioToolbox -framework VideoToolbox -framework CoreMedia -framework CoreVideo -framework ImageIO -framework UniformTypeIdentifiers
-+	clang $(CFLAGS) -I../gfx/nvn/include -I$(dir $(MSL_H)) -I../third_party/vulkan-headers/include -I$(dir $(GAME_H)) -I$(VPX) -I../third_party/stb_vorbis -fobjc-arc -o $@ $(SRC) $(GFX) $(VPX_LIB) -framework Cocoa -framework QuartzCore -framework Metal -framework MetalFX -framework GameController -framework CoreHaptics -framework IOKit -framework AudioToolbox -framework AVFAudio -framework VideoToolbox -framework CoreMedia -framework CoreVideo -framework ImageIO -framework UniformTypeIdentifiers
++dmhost: $(SRC) $(GFX) ../third_party/stb_vorbis/stb_vorbis.c dm.h hle.h romfs_image.h save_sync.h dm_input.h pad_slots.h hle_haptics.h haptics_apple.h motion_fusion.h motion_apple.h motion_pro.h motion_pro_mac.h pad_apple.h pad_hid.h pad_hid_mac.h controls_map.h controls_front.h controls_state.h controls_mac.h front.h $(GFX_H) $(GAME_H) $(GAME_STAMP) $(VPX_LIB) $(MSL_H)
++	clang $(CFLAGS) -I../gfx/nvn/include -I$(dir $(MSL_H)) -I../third_party/vulkan-headers/include -I$(dir $(GAME_H)) -I$(VPX) -I../third_party/stb_vorbis -fobjc-arc -o $@ $(SRC) $(GFX) $(VPX_LIB) -framework Cocoa -framework QuartzCore -framework Metal -framework MetalFX -framework GameController -framework CoreHaptics -framework IOKit -framework AudioToolbox -framework AVFAudio -framework VideoToolbox -framework CoreMedia -framework CoreVideo -framework ImageIO -framework UniformTypeIdentifiers -framework Carbon
  clean:   # the host and everything make generates for it (gen/: the profile headers, the game stamp and the libvpx build; dmhost_* and *.dSYM beside them, as in .gitignore)
  	rm -rf gen dmhost dmhost_* *.dSYM
  .PHONY: clean
+diff --git a/dm/host/controls_front.h b/dm/host/controls_front.h
+new file mode 100644
+index 0000000..0eeb137
+--- /dev/null
++++ b/dm/host/controls_front.h
+@@ -0,0 +1,20 @@
++// The front end's side of the in-game Settings window, on the Mac (front_mac.m for controls_mac.m) and the iPhone (DmGamepad.m for DmSettingsSheet.m): the map in
++// use (controls.json, controls_map.h), the connected controllers and the capture of the next key or controller input. Main thread only
++#pragma once
++#include "controls_map.h"
++
++typedef struct { const void *owner; int player, type; char name[64]; } front_pad_entry;   // a connected controller: its player (0 = player 1), CM_PAD_* type, name
++const cm_controls *front_controls(void);           // the map in use
++const char *front_controls_path(void);             // controls.json
++void front_controls_set(const cm_controls *c);     // use it now and write controls.json
++int front_pads(front_pad_entry *out, int max);     // the connected controllers, by player
++void front_player1(const void *owner);             // that controller takes player 1 and is remembered; NULL forgets the remembered one
++// The next key (its USB usage; the Mac only), controller input (CM_IN_*) or controller (FRONT_CAP_P1: value 0, owner the controller) goes to done instead of the
++// game; -1 when Esc cancelled it or another capture replaced it, -2 when nothing came within 8 seconds
++enum { FRONT_CAP_KEY = 1, FRONT_CAP_PAD, FRONT_CAP_P1 };
++void front_capture(int kind, void (^done)(int value, const void *owner));
++void front_capture_cancel(void);
++
++// dm/gfx/nvn/nvn_mtl.m
++void dm_present_upscale_set(int on);              // MetalFX from the next present, when the GPU has it
++int dm_present_upscale_get(int *supported);       // the mode in effect (1 MetalFX); *supported: 1, 0, or -1 before the first present
+diff --git a/dm/host/controls_mac.h b/dm/host/controls_mac.h
+new file mode 100644
+index 0000000..757a176
+--- /dev/null
++++ b/dm/host/controls_mac.h
+@@ -0,0 +1,14 @@
++// The Mac's Settings window (controls_mac.m: F1, the app menu's Settings…) and the front end (front_mac.m), which holds the map, the players and the capture
++#pragma once
++#import <Cocoa/Cocoa.h>
++#include "controls_front.h"
++
++// ---------- front_mac.m, besides controls_front.h ----------
++int front_fullscreen(void);                         // the window is in fullscreen
++void front_fullscreen_set(int on);
++
++// ---------- controls_mac.m ----------
++void controls_window_toggle(void);
++BOOL controls_window_is(NSWindow *w);   // the Settings window (its keys go to a capture too)
++void controls_window_pads_changed(void);
++NSMenuItem *controls_menu_item(void);   // the app menu's Settings… (⌘,)
+diff --git a/dm/host/controls_mac.m b/dm/host/controls_mac.m
+new file mode 100644
+index 0000000..cf9b467
+--- /dev/null
++++ b/dm/host/controls_mac.m
+@@ -0,0 +1,300 @@
++// The Settings window (F1, or Settings… ⌘, in the app menu): three pages in a utility panel beside the game, which never takes the keyboard from the game for a
++// click and shows over fullscreen too, as the Cheats panel (front_mac.m) does.
++//   - Keyboard: the key of each Switch button, stick direction and the shake. Click one, then press its new key (Esc cancels); a key another action had swaps.
++//   - Controller: player 1 (a connected controller chosen from the list, or the one a button is pressed on; remembered in controls.json), then the controller
++//     input of each Switch button, one map for every controller, chosen the same way.
++//   - Graphics: what the engine changes while the game runs (console mode, upscaling, display mode), each also kept as the launcher window's saved choice
++//     (launcher.<VAR> in the app's preferences, dm/mac/launcher.c) for the next start. The other settings are the launcher window's, read once at start.
++// Reset to defaults resets the page shown. front_mac.m holds the map, the players and the capture and writes controls.json at every change (controls_mac.h)
++#import <Cocoa/Cocoa.h>
++#import <Carbon/Carbon.h>   // the keyboard layout's character for a key (UCKeyTranslate)
++#include "dm.h"
++#include "hle.h"
++#include "controls_mac.h"
++
++enum { PAGE_KEYS, PAGE_PAD, PAGE_GFX };
++enum { ACT_P1 = -2 };   // the capture for player 1 (the actions are 0..CM_ACTS-1)
++
++// A key's name as this Mac's keyboard layout prints it (a French keyboard's A is the US layout's Q position), else controls_map.h's
++static NSString *key_label(int u) {
++    char n[40]; cm_key_name(u, n, sizeof n);
++    int printable = (u >= 4 && u <= 39) || (u >= 45 && u <= 56) || u == 100;
++    int kvk = -1; for (int k = 0; k < 128 && printable && kvk < 0; k++) if (cm_kvk_usage[k] == u) kvk = k;
++    if (kvk < 0) return @(n);
++    TISInputSourceRef src = TISCopyCurrentKeyboardLayoutInputSource(); if (!src) return @(n);
++    CFDataRef data = TISGetInputSourceProperty(src, kTISPropertyUnicodeKeyLayoutData);
++    NSString *r = nil;
++    if (data) {
++        UInt32 dead = 0; UniChar ch[4]; UniCharCount len = 0;
++        if (UCKeyTranslate((const UCKeyboardLayout *)CFDataGetBytePtr(data), (UInt16)kvk, kUCKeyActionDisplay, 0, LMGetKbdType(), kUCKeyTranslateNoDeadKeysBit,
++                           &dead, 4, &len, ch) == noErr && len > 0)
++            r = [[NSString stringWithCharacters:ch length:len] uppercaseString];
++    }
++    CFRelease(src);
++    return r.length && ![r isEqualToString:@" "] ? r : @(n);
++}
++// The face-button words of player 1's controller
++static int p1_type(void) {
++    front_pad_entry p[DM_PLAYERS]; int n = front_pads(p, DM_PLAYERS);
++    for (int i = 0; i < n; i++) if (p[i].player == 0) return p[i].type;
++    return CM_PAD_UNKNOWN;
++}
++static NSString *in_label(int in) { char w[48]; cm_in_text(in, p1_type(), w, sizeof w); return @(w); }
++// A variable an env file or the launch environment set (launcher.c DM_ENV_FILE_KEYS, DM_ENV_LAUNCH_KEYS): the launcher window shows it fixed, so does this one
++static int env_fixed(const char *var) {
++    for (int i = 0; i < 2; i++) {
++        const char *l = getenv(i ? "DM_ENV_LAUNCH_KEYS" : "DM_ENV_FILE_KEYS"); size_t n = strlen(var);
++        for (const char *p = l ? strstr(l, var) : NULL; p; p = strstr(p + 1, var))
++            if ((p == l || p[-1] == ' ') && (p[n] == ' ' || !p[n])) return 1;
++    }
++    return 0;
++}
++// A graphics choice kept for the next start, as the launcher window keeps it (a string, launcher.<VAR>, the app's preferences)
++static void save_choice(const char *var, const char *value) {
++    CFStringRef domain = CFBundleGetIdentifier(CFBundleGetMainBundle());
++    if (!domain) { LOG("settings: %s=%s for this run only (the host is not inside an app, so there is no saved choice)", var, value); return; }
++    CFStringRef key = CFStringCreateWithFormat(NULL, NULL, CFSTR("launcher.%s"), var), v = CFStringCreateWithCString(NULL, value, kCFStringEncodingUTF8);
++    CFPreferencesSetAppValue(key, v, domain); CFPreferencesAppSynchronize(domain);
++    CFRelease(key); CFRelease(v);
++    LOG("settings: %s=%s now, and kept for the next start", var, value);
++}
++
++@interface DmSettingsNSPanel : NSPanel @end
++@implementation DmSettingsNSPanel
++- (BOOL)canBecomeKeyWindow { return YES; }
++@end
++@interface DmSettingsDocView : NSView @end   // flipped, so the rows start at the top
++@implementation DmSettingsDocView
++- (BOOL)isFlipped { return YES; }
++@end
++
++@interface DmSettings : NSObject <NSWindowDelegate>
++@property(readonly) NSPanel *panel;
++- (void)show;
++- (void)toggle;
++- (void)refresh;
++@end
++static DmSettings *g_settings;   // created on the first F1 or Settings…, kept for the process's lifetime
++
++@implementation DmSettings {
++    NSSegmentedControl *_pages;
++    NSStackView *_rows;
++    NSTextField *_hint, *_status;
++    NSButton *_reset;
++    int _page, _capAct;   // the action whose button waits for its key or input, -1 none
++}
++
++- (instancetype)init {
++    if (!(self = [super init])) return nil;
++    _capAct = -1;
++    _panel = [[DmSettingsNSPanel alloc] initWithContentRect:NSMakeRect(0, 0, 480, 640)
++                                                  styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskResizable | NSWindowStyleMaskUtilityWindow
++                                                    backing:NSBackingStoreBuffered defer:NO];
++    _panel.title = @"Settings";
++    _panel.releasedWhenClosed = NO;
++    _panel.floatingPanel = YES;
++    _panel.becomesKeyOnlyIfNeeded = YES;   // a click never takes the keyboard from the game: its keys reach the capture from the game window
++    _panel.collectionBehavior = NSWindowCollectionBehaviorFullScreenAuxiliary;
++    _panel.minSize = NSMakeSize(420, 360);
++    _panel.delegate = self;
++
++    _pages = [NSSegmentedControl segmentedControlWithLabels:@[@"Keyboard", @"Controller", @"Graphics"] trackingMode:NSSegmentSwitchTrackingSelectOne
++                                                     target:self action:@selector(pageChosen:)];
++    _pages.selectedSegment = 0;
++    _hint = [NSTextField wrappingLabelWithString:@""]; _hint.textColor = NSColor.secondaryLabelColor;
++    _rows = [NSStackView new]; _rows.orientation = NSUserInterfaceLayoutOrientationVertical; _rows.alignment = NSLayoutAttributeLeading; _rows.spacing = 6;
++    _rows.translatesAutoresizingMaskIntoConstraints = NO;
++    NSView *doc = [DmSettingsDocView new]; doc.translatesAutoresizingMaskIntoConstraints = NO; [doc addSubview:_rows];
++    NSScrollView *scroll = [NSScrollView new]; scroll.hasVerticalScroller = YES; scroll.drawsBackground = NO; scroll.documentView = doc;
++    scroll.translatesAutoresizingMaskIntoConstraints = NO;
++    [NSLayoutConstraint activateConstraints:@[
++        [_rows.topAnchor constraintEqualToAnchor:doc.topAnchor constant:4], [_rows.leadingAnchor constraintEqualToAnchor:doc.leadingAnchor],
++        [_rows.trailingAnchor constraintEqualToAnchor:doc.trailingAnchor], [_rows.bottomAnchor constraintEqualToAnchor:doc.bottomAnchor constant:-4],
++        [doc.widthAnchor constraintEqualToAnchor:scroll.contentView.widthAnchor]]];
++    _status = [NSTextField wrappingLabelWithString:@""];
++    _reset = [NSButton buttonWithTitle:@"Reset to defaults" target:self action:@selector(resetPage:)];
++    NSStackView *bottom = [NSStackView stackViewWithViews:@[_status, _reset]]; bottom.orientation = NSUserInterfaceLayoutOrientationHorizontal; bottom.alignment = NSLayoutAttributeCenterY;
++    [_status setContentCompressionResistancePriority:NSLayoutPriorityDefaultLow forOrientation:NSLayoutConstraintOrientationHorizontal];
++    [_status setContentHuggingPriority:NSLayoutPriorityDefaultLow forOrientation:NSLayoutConstraintOrientationHorizontal];
++    NSStackView *all = [NSStackView stackViewWithViews:@[_pages, _hint, scroll, bottom]];
++    all.orientation = NSUserInterfaceLayoutOrientationVertical; all.alignment = NSLayoutAttributeLeading; all.spacing = 10;
++    all.edgeInsets = NSEdgeInsetsMake(12, 14, 12, 14); all.translatesAutoresizingMaskIntoConstraints = NO;
++    NSView *content = _panel.contentView; [content addSubview:all];
++    [NSLayoutConstraint activateConstraints:@[
++        [all.topAnchor constraintEqualToAnchor:content.topAnchor], [all.bottomAnchor constraintEqualToAnchor:content.bottomAnchor],
++        [all.leadingAnchor constraintEqualToAnchor:content.leadingAnchor], [all.trailingAnchor constraintEqualToAnchor:content.trailingAnchor],
++        [scroll.widthAnchor constraintEqualToAnchor:all.widthAnchor constant:-28], [_hint.widthAnchor constraintEqualToAnchor:scroll.widthAnchor],
++        [bottom.widthAnchor constraintEqualToAnchor:scroll.widthAnchor], [scroll.heightAnchor constraintGreaterThanOrEqualToConstant:160]]];
++    [_pages.centerXAnchor constraintEqualToAnchor:all.centerXAnchor].active = YES;
++    [scroll setContentHuggingPriority:NSLayoutPriorityDefaultLow - 1 forOrientation:NSLayoutConstraintOrientationVertical];
++    [_panel center];
++    _panel.frameAutosaveName = @"DmSettingsPanel";   // place and size remembered
++    // The display mode row follows the window however it changed (the green button, ⌃⌘F)
++    for (NSNotificationName nm in @[NSWindowDidEnterFullScreenNotification, NSWindowDidExitFullScreenNotification])
++        [NSNotificationCenter.defaultCenter addObserverForName:nm object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *n) {
++            (void)n; if (self->_page == PAGE_GFX && self->_panel.visible) [self refresh]; }];
++    return self;
++}
++
++- (void)show { [_panel orderFront:self]; [self refresh]; }
++- (void)toggle { if (_panel.visible) [self hide]; else [self show]; }
++- (void)hide { front_capture_cancel(); [_panel orderOut:self]; }
++- (BOOL)windowShouldClose:(NSWindow *)w { (void)w; [self hide]; return NO; }   // closing only hides: the place and the page stay
++- (void)pageChosen:(NSSegmentedControl *)s { front_capture_cancel(); _page = (int)s.selectedSegment; _status.stringValue = @""; [self refresh]; }
++
++// ---- the rows ----
++static NSStackView *row(NSString *label, NSView *control) {
++    NSTextField *l = [NSTextField labelWithString:label]; l.alignment = NSTextAlignmentRight;
++    [l.widthAnchor constraintEqualToConstant:150].active = YES;
++    NSStackView *s = [NSStackView stackViewWithViews:@[l, control]];
++    s.orientation = NSUserInterfaceLayoutOrientationHorizontal; s.alignment = NSLayoutAttributeCenterY; s.spacing = 12;
++    return s;
++}
++- (NSButton *)bindButton:(NSString *)title tag:(int)tag action:(SEL)sel {
++    NSButton *b = [NSButton buttonWithTitle:title target:self action:sel]; b.tag = tag;
++    [b.widthAnchor constraintGreaterThanOrEqualToConstant:220].active = YES;
++    return b;
++}
++static NSTextField *heading(NSString *s) { NSTextField *t = [NSTextField labelWithString:s]; t.font = [NSFont boldSystemFontOfSize:NSFont.systemFontSize]; return t; }
++static NSSegmentedControl *choice(NSArray<NSString *> *labels, NSInteger selected, id target, SEL action) {
++    NSSegmentedControl *c = [NSSegmentedControl segmentedControlWithLabels:labels trackingMode:NSSegmentSwitchTrackingSelectOne target:target action:action];
++    c.selectedSegment = selected; return c;
++}
++
++- (void)refresh {
++    if (!_panel) return;
++    for (NSView *v in [_rows.arrangedSubviews copy]) { [_rows removeArrangedSubview:v]; [v removeFromSuperview]; }
++    _pages.selectedSegment = _page;
++    _reset.hidden = _page == PAGE_GFX;
++    const cm_controls *c = front_controls();
++    if (_page == PAGE_KEYS) {
++        _hint.stringValue = @"Click a button, then press its new key (Esc cancels). A key another button had swaps with it.";
++        for (int a = 0; a < CM_ACTS; a++)
++            [_rows addArrangedSubview:row(@(cm_act_labels[a]), [self bindButton:_capAct == a ? @"Press a key…" : key_label(c->keys.key[a]) tag:a action:@selector(keyClicked:)])];
++    } else if (_page == PAGE_PAD) {
++        _hint.stringValue = @"One map for every controller. Click a button, then press the controller button for it or pull the trigger (Esc cancels).";
++        front_pad_entry p[DM_PLAYERS]; int n = front_pads(p, DM_PLAYERS);
++        NSPopUpButton *pick = [[NSPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:NO];
++        pick.target = self; pick.action = @selector(p1Chosen:);
++        for (int i = 0; i < n; i++) {
++            [pick addItemWithTitle:[NSString stringWithFormat:@"%@ (player %d)", @(p[i].name), p[i].player + 1]];
++            pick.lastItem.representedObject = [NSValue valueWithPointer:p[i].owner];
++            if (p[i].player == 0) [pick selectItem:pick.lastItem];
++        }
++        if (!n) { [pick addItemWithTitle:@"No controller connected"]; pick.enabled = NO; }
++        else if (!pick.selectedItem.representedObject || pick.indexOfSelectedItem < 0) [pick selectItemAtIndex:0];
++        [pick.widthAnchor constraintGreaterThanOrEqualToConstant:220].active = YES;
++        [_rows addArrangedSubview:row(@"Player 1", pick)];
++        NSButton *press = [self bindButton:_capAct == ACT_P1 ? @"Press a button on it…" : @"Choose by pressing a button" tag:ACT_P1 action:@selector(p1Press:)];
++        press.enabled = n > 0;
++        [_rows addArrangedSubview:row(@"", press)];
++        NSButton *forget = [NSButton buttonWithTitle:@"Forget" target:self action:@selector(p1Forget:)]; forget.enabled = c->p1[0] != 0;
++        NSStackView *rem = [NSStackView stackViewWithViews:@[[NSTextField labelWithString:c->p1[0] ? @(c->p1) : @"none"], forget]]; rem.spacing = 8;
++        [_rows addArrangedSubview:row(@"Remembered", rem)];
++        [_rows addArrangedSubview:heading(@"Buttons")];
++        for (int a = 0; a < CM_PACTS; a++)
++            [_rows addArrangedSubview:row(@(cm_act_labels[a]), [self bindButton:_capAct == a ? @"Press a controller button…" : in_label(c->pad.in[a]) tag:a action:@selector(padClicked:)])];
++    } else {
++        _hint.stringValue = @"These change the game now and are kept for the next start. The launcher window, shown before the game starts, has the other settings.";
++        int sup = 0, fx = dm_present_upscale_get(&sup);
++        NSSegmentedControl *mode = choice(@[@"Docked", @"Handheld"], dm_opmode() == 1 ? 0 : 1, self, @selector(opmodeChosen:));
++        NSSegmentedControl *up = choice(@[@"Standard", @"MetalFX"], fx ? 1 : 0, self, @selector(upscaleChosen:));
++        NSSegmentedControl *disp = choice(@[@"Window", @"Fullscreen"], front_fullscreen() ? 1 : 0, self, @selector(displayChosen:));
++        if (sup == 0) { [up setEnabled:NO forSegment:1]; up.toolTip = @"This Mac's GPU has no MetalFX spatial scaler"; }
++        struct { NSSegmentedControl *c; const char *var; NSString *label; } r[3] = {{mode, "DM_OPMODE", @"Console mode"}, {up, "DM_PRESENT_UPSCALE", @"Upscaling"},
++                                                                                     {disp, "DM_FULLSCREEN", @"Display mode"}};
++        for (int i = 0; i < 3; i++) {
++            if (env_fixed(r[i].var)) { r[i].c.enabled = NO; r[i].c.toolTip = [NSString stringWithFormat:@"Set by env.txt or the launch environment (%s)", r[i].var]; }
++            [_rows addArrangedSubview:row(r[i].label, r[i].c)];
++        }
++    }
++}
++
++// ---- the actions ----
++- (void)setStatus:(NSString *)s { _status.stringValue = s; LOG("settings: %s", s.UTF8String); }
++- (void)capture:(int)kind act:(int)act {
++    _capAct = act;
++    [self refresh];
++    _status.stringValue = kind == FRONT_CAP_KEY ? [NSString stringWithFormat:@"Press the key for %s (Esc cancels)", cm_act_labels[act]]
++                        : kind == FRONT_CAP_PAD ? [NSString stringWithFormat:@"Press the controller button for %s, or pull a trigger (Esc cancels)", cm_act_labels[act]]
++                        : @"Press any button on the controller that should be player 1 (Esc cancels)";
++    __weak DmSettings *w = self;
++    front_capture(kind, ^(int v, const void *owner) { [w captured:v owner:owner kind:kind act:act]; });
++}
++- (void)captured:(int)v owner:(const void *)owner kind:(int)kind act:(int)act {
++    _capAct = -1;
++    cm_controls c = *front_controls();
++    if (v == -1) _status.stringValue = @"Cancelled: nothing changed";
++    else if (v == -2) _status.stringValue = @"Nothing was pressed within 8 seconds: nothing changed";
++    else if (kind == FRONT_CAP_KEY) {
++        if (cm_key_reserved(v)) [self setStatus:[NSString stringWithFormat:@"%@ stays with the game window (Esc, F1, F11, Caps Lock, Command): choose another key", key_label(v)]];
++        else {
++            int other = cm_keymap_action(&c.keys, v), old = c.keys.key[act];
++            cm_keymap_bind(&c.keys, act, v); front_controls_set(&c);
++            [self setStatus:other >= 0 && other != act ? [NSString stringWithFormat:@"%s: %@ (%s takes %@)", cm_act_labels[act], key_label(v), cm_act_labels[other], key_label(old)]
++                                                      : [NSString stringWithFormat:@"%s: %@", cm_act_labels[act], key_label(v)]];
++        }
++    } else if (kind == FRONT_CAP_PAD) {
++        if (cm_in_reserved(v)) [self setStatus:@"Home belongs to the system: choose another button"];
++        else {
++            int other = -1, old = c.pad.in[act];
++            for (int a = 0; a < CM_PACTS; a++) if (a != act && c.pad.in[a] == v) other = a;
++            cm_padmap_bind(&c.pad, act, v); c.pad_custom = 1; front_controls_set(&c);
++            [self setStatus:other >= 0 ? [NSString stringWithFormat:@"%s: %@ (%s takes %@)", cm_act_labels[act], in_label(v), cm_act_labels[other], in_label(old)]
++                                       : [NSString stringWithFormat:@"%s: %@", cm_act_labels[act], in_label(v)]];
++        }
++    } else {
++        front_player1(owner);
++        [self setStatus:front_controls()->p1[0] ? [NSString stringWithFormat:@"%@ is player 1 now, and stays player 1 when it connects", @(front_controls()->p1)]
++                                                : @"That controller could not take player 1 (the keyboard keeps it with DM_KBD_PLAYER=own)"];
++    }
++    [self refresh];
++}
++- (void)keyClicked:(NSButton *)b { [self capture:FRONT_CAP_KEY act:(int)b.tag]; }
++- (void)padClicked:(NSButton *)b { [self capture:FRONT_CAP_PAD act:(int)b.tag]; }
++- (void)p1Press:(NSButton *)b { (void)b; [self capture:FRONT_CAP_P1 act:ACT_P1]; }
++- (void)p1Chosen:(NSPopUpButton *)p {
++    const void *owner = [p.selectedItem.representedObject pointerValue]; if (!owner) return;
++    front_capture_cancel(); front_player1(owner);
++    [self setStatus:[NSString stringWithFormat:@"%@ is player 1 now, and stays player 1 when it connects", @(front_controls()->p1)]];
++    [self refresh];
++}
++- (void)p1Forget:(NSButton *)b { (void)b; front_player1(NULL); [self setStatus:@"No controller is remembered as player 1: they take players in the order they connect"]; [self refresh]; }
++- (void)resetPage:(NSButton *)b {
++    (void)b; front_capture_cancel();
++    cm_controls c = *front_controls();
++    if (_page == PAGE_KEYS) { cm_keymap_default(&c.keys); front_controls_set(&c); [self setStatus:@"Keyboard: back to the default keys"]; }
++    else if (_page == PAGE_PAD) { cm_padmap_default(&c.pad); c.pad_custom = 0; front_controls_set(&c); [self setStatus:@"Controller: back to the controllers' own layout"]; }
++    [self refresh];
++}
++- (void)opmodeChosen:(NSSegmentedControl *)s {
++    int docked = s.selectedSegment == 0;
++    dm_set_opmode(docked); save_choice("DM_OPMODE", docked ? "1" : "0");
++    _status.stringValue = docked ? @"Console mode: docked" : @"Console mode: handheld";
++}
++- (void)upscaleChosen:(NSSegmentedControl *)s {
++    int on = s.selectedSegment == 1;
++    dm_present_upscale_set(on); save_choice("DM_PRESENT_UPSCALE", on ? "metalfx" : "off");
++    _status.stringValue = on ? @"Upscaling: MetalFX (from the next frame)" : @"Upscaling: standard";
++}
++- (void)displayChosen:(NSSegmentedControl *)s {
++    int full = s.selectedSegment == 1;
++    front_fullscreen_set(full); save_choice("DM_FULLSCREEN", full ? "1" : "0");
++    _status.stringValue = full ? @"Display mode: fullscreen" : @"Display mode: window";
++}
++@end
++
++void controls_window_toggle(void) { if (!g_settings) g_settings = [DmSettings new]; [g_settings toggle]; }
++BOOL controls_window_is(NSWindow *w) { return g_settings && w && w == g_settings.panel; }
++void controls_window_pads_changed(void) { if (g_settings.panel.visible) [g_settings refresh]; }
++
++@interface DmSettingsMenuTarget : NSObject @end
++@implementation DmSettingsMenuTarget
++- (void)showSettings:(id)s { (void)s; if (!g_settings) g_settings = [DmSettings new]; [g_settings show]; }
++@end
++NSMenuItem *controls_menu_item(void) {
++    static DmSettingsMenuTarget *t; if (!t) t = [DmSettingsMenuTarget new];
++    NSMenuItem *it = [[NSMenuItem alloc] initWithTitle:@"Settings…" action:@selector(showSettings:) keyEquivalent:@","];
++    it.target = t;
++    return it;
++}
+diff --git a/dm/host/controls_map.h b/dm/host/controls_map.h
+new file mode 100644
+index 0000000..14d63a3
+--- /dev/null
++++ b/dm/host/controls_map.h
+@@ -0,0 +1,274 @@
++// controls.json: the keyboard's and the controllers' map, in the file format of the Windows / Linux front end (its front_map.h), so a file written by one reads the
++// same in the other. Pure, so tests/t_controls_map.c checks it without a window or controllers. The Mac reads it at start from the settings folder
++// ($DM_ROOT/controls.json, ~/Library/Application Support/nxnative/<title ID>/; DM_KEYMAP=<file> names another) and its Settings window writes it (front_mac.m,
++// controls_mac.m); the iPhone reads and writes Documents/controls.json for the controllers (front_ios.m, DmGamepad.m). Fields:
++//   - "<action>": <key> for the 21 actions below, the key's position as a USB HID usage of the keyboard page (the same numbers as SDL's scancodes);
++//   - "pad": {"<button>": "<input>", ...}: the controller input of each Switch button, one map for every controller. Inputs are named by their place as SDL
++//     names them ("south" is the bottom face button whatever is printed on it), plus "lefttrigger" / "righttrigger" and "none". Without the object the front end
++//     keeps its own layout;
++//   - "player1_mac": the name of the controller that takes player 1 when it connects. The Windows build's "player1" / "player1_name" are SDL's and kept as they are.
++#pragma once
++#include <stdint.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include "dm_input.h"
++
++// ---------- Keys ----------
++// Actions 0-15 are the NpadButtons in their bit order, then the left stick's four directions and the shake
++enum { CM_ACT_STICK_UP = 16, CM_ACT_STICK_LEFT, CM_ACT_STICK_DOWN, CM_ACT_STICK_RIGHT, CM_ACT_SHAKE, CM_ACTS };
++static const char *const cm_act_names[CM_ACTS] = {"A", "B", "X", "Y", "LS", "RS", "L", "R", "ZL", "ZR", "Plus", "Minus", "Left", "Up", "Right", "Down",
++                                                  "StickUp", "StickLeft", "StickDown", "StickRight", "Shake"};
++static const char *const cm_act_labels[CM_ACTS] = {"A", "B", "X", "Y", "Left stick press", "Right stick press", "L", "R", "ZL", "ZR", "+ (Plus)", "- (Minus)",
++                                                   "D-pad left", "D-pad up", "D-pad right", "D-pad down", "Stick up", "Stick left", "Stick down", "Stick right", "Shake"};
++enum { CM_KEY_A = 4, CM_KEY_C = 6, CM_KEY_D = 7, CM_KEY_E = 8, CM_KEY_F = 9, CM_KEY_G = 10, CM_KEY_I = 12, CM_KEY_J = 13, CM_KEY_K = 14, CM_KEY_Q = 20,
++       CM_KEY_S = 22, CM_KEY_U = 24, CM_KEY_W = 26, CM_KEY_Z = 29, CM_KEY_RETURN = 40, CM_KEY_ESCAPE = 41, CM_KEY_TAB = 43, CM_KEY_SPACE = 44,
++       CM_KEY_CAPSLOCK = 57, CM_KEY_F1 = 58, CM_KEY_F11 = 68, CM_KEY_RIGHT = 79, CM_KEY_LEFT = 80, CM_KEY_DOWN = 81, CM_KEY_UP = 82,
++       CM_KEY_LGUI = 227, CM_KEY_RGUI = 231 };
++typedef struct { uint16_t key[CM_ACTS]; } cm_keymap;   // 0: no key
++static inline void cm_keymap_default(cm_keymap *m) {   // the Mac's layout, which the Windows front end uses too
++    static const uint16_t d[CM_ACTS] = {CM_KEY_J, CM_KEY_K, CM_KEY_U, CM_KEY_I, CM_KEY_F, CM_KEY_G, CM_KEY_Q, CM_KEY_E, CM_KEY_Z, CM_KEY_C, CM_KEY_RETURN, CM_KEY_TAB,
++                                        CM_KEY_LEFT, CM_KEY_UP, CM_KEY_RIGHT, CM_KEY_DOWN, CM_KEY_W, CM_KEY_A, CM_KEY_S, CM_KEY_D, CM_KEY_SPACE};
++    memcpy(m->key, d, sizeof d);
++}
++// Keys a map may not take: Windows' (Esc releases the mouse, F11 is fullscreen, nothing outside the keyboard's usages), and on the Mac F1 (the Settings window),
++// Caps Lock (macOS reports only its toggling) and Command (its shortcuts go to the menu bar)
++static inline int cm_key_reserved(long u) {
++    return u < CM_KEY_A || u > CM_KEY_RGUI || u == CM_KEY_ESCAPE || u == CM_KEY_F11 || u == CM_KEY_F1 || u == CM_KEY_CAPSLOCK || u == CM_KEY_LGUI || u == CM_KEY_RGUI;
++}
++// The file's text: every "<action>": <number> pair names an action's key, from the default; 0 leaves it without one; a reserved key, or one an earlier action
++// asked for, is refused. An action not asked for keeps its default key unless an asked one took it (then it has none). Returns the actions set; *refused
++// counts the refusals
++static inline int cm_keymap_parse(cm_keymap *m, const char *t, int *refused) {
++    cm_keymap_default(m);
++    int want[CM_ACTS];   // -1 not asked, 0 asked for none
++    for (int i = 0; i < CM_ACTS; i++) want[i] = -1;
++    int set = 0, bad = 0;
++    for (const char *p = t ? strchr(t, '"') : NULL; p; p = strchr(p, '"')) {
++        const char *q = strchr(p + 1, '"'); if (!q) break;
++        size_t n = (size_t)(q - p - 1); const char *r = q + 1;
++        while (*r == ' ' || *r == '\t' || *r == '\r' || *r == '\n') r++;
++        if (*r != ':') { p = q + 1; continue; }   // a string value, not a name
++        r++; while (*r == ' ' || *r == '\t' || *r == '\r' || *r == '\n') r++;
++        if (*r >= '0' && *r <= '9') {
++            long v = strtol(r, NULL, 10);
++            for (int i = 0; i < CM_ACTS; i++)
++                if (strlen(cm_act_names[i]) == n && !strncmp(p + 1, cm_act_names[i], n)) { if (v && cm_key_reserved(v)) bad++; else want[i] = (int)v; }
++        }
++        p = r;
++    }
++    for (int i = 0; i < CM_ACTS; i++) {   // a key asked twice goes to the first action
++        if (want[i] < 0) continue;
++        if (!want[i]) { m->key[i] = 0; set++; continue; }
++        int dup = 0; for (int j = 0; j < i; j++) dup |= want[j] == want[i];
++        if (dup) { bad++; want[i] = -1; } else { m->key[i] = (uint16_t)want[i]; set++; }
++    }
++    for (int i = 0; i < CM_ACTS; i++) {
++        if (want[i] >= 0) continue;
++        for (int j = 0; j < CM_ACTS; j++) if (want[j] > 0 && want[j] == m->key[i]) { m->key[i] = 0; break; }
++    }
++    if (refused) *refused = bad;
++    return set;
++}
++static inline int cm_keymap_action(const cm_keymap *m, int usage) {   // the action a key does, -1 for none
++    if (usage <= 0) return -1;
++    for (int i = 0; i < CM_ACTS; i++) if (m->key[i] == usage) return i;
++    return -1;
++}
++// A key for an action; the action that had it takes this one's old key (the two swap). 0 when the key is reserved
++static inline int cm_keymap_bind(cm_keymap *m, int act, int usage) {
++    if (act < 0 || act >= CM_ACTS || cm_key_reserved(usage)) return 0;
++    uint16_t old = m->key[act];
++    for (int i = 0; i < CM_ACTS; i++) if (i != act && m->key[i] == usage) m->key[i] = old;
++    m->key[act] = (uint16_t)usage;
++    return 1;
++}
++// The keyboard's state: buttons held (DM_BTN_SHAKE for the shake) and the four stick keys. A key event; 1 when the state changed (a key the game takes)
++typedef struct { uint64_t btn; int w, a, s, d; } cm_kbd;
++static inline int cm_kbd_key(cm_kbd *k, const cm_keymap *m, int usage, int down) {
++    int a = cm_keymap_action(m, usage); if (a < 0) return 0;
++    int *stick = a == CM_ACT_STICK_UP ? &k->w : a == CM_ACT_STICK_LEFT ? &k->a : a == CM_ACT_STICK_DOWN ? &k->s : a == CM_ACT_STICK_RIGHT ? &k->d : NULL;
++    if (stick) { if (*stick == !!down) return 0; *stick = !!down; return 1; }
++    uint64_t mk = a == CM_ACT_SHAKE ? DM_BTN_SHAKE : 1ull << a;
++    uint64_t b = down ? k->btn | mk : k->btn & ~mk; if (b == k->btn) return 0;
++    k->btn = b; return 1;
++}
++
++// macOS virtual key codes (Carbon's kVK_*, key positions as on an ANSI keyboard) to USB usages; 0 for a key without one (fn). The iPhone's GCKeyCode values
++// are USB usages already
++static const uint8_t cm_kvk_usage[128] = {
++    [0x00] = 4,  [0x01] = 22, [0x02] = 7,  [0x03] = 9,  [0x04] = 11, [0x05] = 10, [0x06] = 29, [0x07] = 27, [0x08] = 6,  [0x09] = 25, [0x0A] = 100, [0x0B] = 5,
++    [0x0C] = 20, [0x0D] = 26, [0x0E] = 8,  [0x0F] = 21, [0x10] = 28, [0x11] = 23, [0x12] = 30, [0x13] = 31, [0x14] = 32, [0x15] = 33, [0x16] = 35, [0x17] = 34,
++    [0x18] = 46, [0x19] = 38, [0x1A] = 36, [0x1B] = 45, [0x1C] = 37, [0x1D] = 39, [0x1E] = 48, [0x1F] = 18, [0x20] = 24, [0x21] = 47, [0x22] = 12, [0x23] = 19,
++    [0x24] = 40, [0x25] = 15, [0x26] = 13, [0x27] = 52, [0x28] = 14, [0x29] = 51, [0x2A] = 49, [0x2B] = 54, [0x2C] = 56, [0x2D] = 17, [0x2E] = 16, [0x2F] = 55,
++    [0x30] = 43, [0x31] = 44, [0x32] = 53, [0x33] = 42, [0x35] = 41, [0x36] = 231, [0x37] = 227, [0x38] = 225, [0x39] = 57, [0x3A] = 226, [0x3B] = 224,
++    [0x3C] = 229, [0x3D] = 230, [0x3E] = 228, [0x40] = 108, [0x41] = 99, [0x43] = 85, [0x45] = 87, [0x47] = 83, [0x48] = 128, [0x49] = 129, [0x4A] = 127,
++    [0x4B] = 84, [0x4C] = 88, [0x4E] = 86, [0x4F] = 109, [0x50] = 110, [0x51] = 103, [0x52] = 98, [0x53] = 89, [0x54] = 90, [0x55] = 91, [0x56] = 92,
++    [0x57] = 93, [0x58] = 94, [0x59] = 95, [0x5A] = 111, [0x5B] = 96, [0x5C] = 97, [0x5D] = 137, [0x5E] = 135, [0x5F] = 133, [0x60] = 62, [0x61] = 63,
++    [0x62] = 64, [0x63] = 60, [0x64] = 65, [0x65] = 66, [0x66] = 145, [0x67] = 68, [0x68] = 144, [0x69] = 104, [0x6A] = 107, [0x6B] = 105, [0x6D] = 67,
++    [0x6E] = 101, [0x6F] = 69, [0x71] = 106, [0x72] = 73, [0x73] = 74, [0x74] = 75, [0x75] = 76, [0x76] = 61, [0x77] = 77, [0x78] = 59, [0x79] = 78,
++    [0x7A] = 58, [0x7B] = 80, [0x7C] = 79, [0x7D] = 81, [0x7E] = 82};
++static inline int cm_usage_of_kvk(unsigned kvk) { return kvk < 128 ? cm_kvk_usage[kvk] : 0; }
++
++// A key's name for the Settings window, by usage. Letters, digits and punctuation are named as on a US keyboard (the Mac's window shows its own layout's
++// character instead); 0 or an unnamed usage gives "(none)" / "Key <n>"
++static inline void cm_key_name(int u, char *out, size_t cap) {
++    static const char *const punct[] = {"Return", "Esc", "Delete", "Tab", "Space", "-", "=", "[", "]", "\\", "#", ";", "'", "`", ",", ".", "/", "Caps Lock"};   // 40-57
++    static const char *const nav[] = {"Print Screen", "Scroll Lock", "Pause", "Insert / Help", "Home", "Page Up", "Forward Delete", "End", "Page Down",
++                                      "Right arrow", "Left arrow", "Down arrow", "Up arrow", "Clear", "Keypad /", "Keypad *", "Keypad -", "Keypad +", "Keypad Enter"};   // 70-88
++    static const char *const mods[] = {"Left Control", "Left Shift", "Left Option", "Left Command", "Right Control", "Right Shift", "Right Option", "Right Command"};   // 224-231
++    if (u <= 0) snprintf(out, cap, "(none)");
++    else if (u >= 4 && u <= 29) snprintf(out, cap, "%c", 'A' + (u - 4));
++    else if (u >= 30 && u <= 39) snprintf(out, cap, "%c", u == 39 ? '0' : '1' + (u - 30));
++    else if (u >= 40 && u <= 57) snprintf(out, cap, "%s", punct[u - 40]);
++    else if (u >= 58 && u <= 69) snprintf(out, cap, "F%d", u - 57);
++    else if (u >= 70 && u <= 88) snprintf(out, cap, "%s", nav[u - 70]);
++    else if (u >= 89 && u <= 98) snprintf(out, cap, "Keypad %d", u == 98 ? 0 : u - 88);
++    else if (u == 99) snprintf(out, cap, "Keypad .");
++    else if (u == 100) snprintf(out, cap, "Section / <>");
++    else if (u == 101) snprintf(out, cap, "Menu");
++    else if (u == 103) snprintf(out, cap, "Keypad =");
++    else if (u >= 104 && u <= 115) snprintf(out, cap, "F%d", u - 91);
++    else if (u >= 224 && u <= 231) snprintf(out, cap, "%s", mods[u - 224]);
++    else snprintf(out, cap, "Key %d", u);
++}
++
++// ---------- The controller map ----------
++// One input per Switch button (actions 0-15, as the keys'), shared by every controller. Inputs in SDL's order and names, then the triggers
++#define CM_PACTS 16
++enum { CM_IN_SOUTH, CM_IN_EAST, CM_IN_WEST, CM_IN_NORTH, CM_IN_BACK, CM_IN_GUIDE, CM_IN_START, CM_IN_LSTICK, CM_IN_RSTICK, CM_IN_LSHOULDER, CM_IN_RSHOULDER,
++       CM_IN_DUP, CM_IN_DDOWN, CM_IN_DLEFT, CM_IN_DRIGHT, CM_IN_MISC1, CM_IN_RPADDLE1, CM_IN_LPADDLE1, CM_IN_RPADDLE2, CM_IN_LPADDLE2, CM_IN_TOUCHPAD,
++       CM_IN_MISC2, CM_IN_MISC3, CM_IN_MISC4, CM_IN_MISC5, CM_IN_MISC6, CM_IN_LT, CM_IN_RT, CM_INS };
++static const char *const cm_in_names[CM_INS] = {"south", "east", "west", "north", "back", "guide", "start", "leftstick", "rightstick", "leftshoulder",
++    "rightshoulder", "dpup", "dpdown", "dpleft", "dpright", "misc1", "rightpaddle1", "leftpaddle1", "rightpaddle2", "leftpaddle2", "touchpad",
++    "misc2", "misc3", "misc4", "misc5", "misc6", "lefttrigger", "righttrigger"};
++// An input in words, by its place; the face buttons with what the controller prints there (type: 0 unknown, 1 Xbox-style, 2 PlayStation, 3 Nintendo)
++enum { CM_PAD_UNKNOWN, CM_PAD_XBOX, CM_PAD_PLAYSTATION, CM_PAD_NINTENDO };
++static inline void cm_in_text(int in, int type, char *out, size_t cap) {
++    static const char *const words[CM_INS] = {"Bottom", "Right", "Left", "Top", "Back / Select", "Home", "Start / Options", "Left stick press", "Right stick press",
++        "LB / L1", "RB / R1", "D-pad up", "D-pad down", "D-pad left", "D-pad right", "Share / Capture", "Paddle R1", "Paddle L1", "Paddle R2", "Paddle L2",
++        "Touchpad", "Extra 2", "Extra 3", "Extra 4", "Extra 5", "Extra 6", "LT / L2", "RT / R2"};
++    static const char *const face[4][4] = {{0}, {"A", "B", "X", "Y"}, {"Cross", "Circle", "Square", "Triangle"}, {"B", "A", "Y", "X"}};   // south east west north
++    if (in < 0 || in >= CM_INS) snprintf(out, cap, "(none)");
++    else if (in <= CM_IN_NORTH && type > 0 && type < 4) snprintf(out, cap, "%s (%s)", words[in], face[type][in]);
++    else if (in <= CM_IN_NORTH) snprintf(out, cap, "%s face button", words[in]);
++    else snprintf(out, cap, "%s", words[in]);
++}
++typedef struct { int8_t in[CM_PACTS]; } cm_padmap;   // -1: none
++static inline void cm_padmap_default(cm_padmap *m) {   // the layout without a map: the face buttons by place as on a Switch (right A, bottom B, top X, left Y)
++    static const int8_t d[CM_PACTS] = {CM_IN_EAST, CM_IN_SOUTH, CM_IN_NORTH, CM_IN_WEST, CM_IN_LSTICK, CM_IN_RSTICK, CM_IN_LSHOULDER, CM_IN_RSHOULDER, CM_IN_LT, CM_IN_RT,
++                                       CM_IN_START, CM_IN_BACK, CM_IN_DLEFT, CM_IN_DUP, CM_IN_DRIGHT, CM_IN_DDOWN};
++    memcpy(m->in, d, sizeof d);
++}
++static inline int cm_in_reserved(int in) { return in < 0 || in >= CM_INS || in == CM_IN_GUIDE; }   // Home belongs to the system
++static inline int cm_in_by_name(const char *s, size_t n) {
++    for (int i = 0; i < CM_INS; i++) if (strlen(cm_in_names[i]) == n && !strncmp(s, cm_in_names[i], n)) return i;
++    return -1;
++}
++// After "key" and its colon: the value's first character, or NULL
++static inline const char *cm_json_value(const char *t, const char *key) {
++    char k[40]; snprintf(k, sizeof k, "\"%s\"", key);
++    const char *p = t ? strstr(t, k) : NULL; if (!p) return NULL;
++    p += strlen(k); while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') p++;
++    if (*p != ':') return NULL;
++    p++; while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') p++;
++    return p;
++}
++// A name as the file keeps it: quotes, backslashes and control characters become '_' (cm_json_str reads no escapes)
++static inline void cm_name_clean(const char *in, char *out, size_t cap) {
++    size_t i = 0; for (; in && in[i] && i + 1 < cap; i++) out[i] = in[i] == '"' || in[i] == '\\' || (unsigned char)in[i] < 32 ? '_' : in[i];
++    if (cap) out[i] = 0;
++}
++// A string field's value; 0 when there is none or it does not fit
++static inline int cm_json_str(const char *t, const char *key, char *out, size_t cap) {
++    const char *p = cm_json_value(t, key); if (!p || *p != '"' || !cap) return 0;
++    const char *q = strchr(p + 1, '"'); if (!q || (size_t)(q - p - 1) >= cap) return 0;
++    memcpy(out, p + 1, (size_t)(q - p - 1)); out[q - p - 1] = 0; return 1;
++}
++// The "pad" object, as cm_keymap_parse does the keys (a reserved or unknown input, or one an earlier button asked for, is refused; "none" leaves a button
++// without one; a button not asked for keeps its default input unless an asked one took it). The buttons set; -1 when the file has no "pad" object
++static inline int cm_padmap_parse(cm_padmap *m, const char *t, int *refused) {
++    cm_padmap_default(m);
++    if (refused) *refused = 0;
++    const char *p = cm_json_value(t, "pad"), *end = p && *p == '{' ? strchr(p, '}') : NULL;
++    if (!end) return -1;
++    int want[CM_PACTS], set = 0, bad = 0;
++    for (int i = 0; i < CM_PACTS; i++) want[i] = -2;   // -2 not asked, -1 asked for none
++    for (p++; p < end && (p = memchr(p, '"', (size_t)(end - p))) != NULL; ) {
++        const char *q = memchr(p + 1, '"', (size_t)(end - p - 1)); if (!q) break;
++        const char *r = q + 1; while (r < end && (*r == ' ' || *r == '\t' || *r == '\r' || *r == '\n')) r++;
++        if (r >= end || *r != ':') { p = q + 1; continue; }
++        r++; while (r < end && (*r == ' ' || *r == '\t' || *r == '\r' || *r == '\n')) r++;
++        const char *v0 = r < end && *r == '"' ? r + 1 : NULL, *v1 = v0 ? memchr(v0, '"', (size_t)(end - v0)) : NULL;
++        if (!v1) { p = r; continue; }
++        size_t n = (size_t)(q - p - 1), vn = (size_t)(v1 - v0);
++        for (int a = 0; a < CM_PACTS; a++) if (strlen(cm_act_names[a]) == n && !strncmp(p + 1, cm_act_names[a], n)) {
++            int none = vn == 4 && !strncmp(v0, "none", 4), in = none ? -1 : cm_in_by_name(v0, vn);
++            if (!none && cm_in_reserved(in)) bad++; else want[a] = in;
++        }
++        p = v1 + 1;
++    }
++    for (int a = 0; a < CM_PACTS; a++) {   // an input asked twice goes to the first button
++        if (want[a] == -2) continue;
++        if (want[a] == -1) { m->in[a] = -1; set++; continue; }
++        int dup = 0; for (int b = 0; b < a; b++) dup |= want[b] == want[a];
++        if (dup) { bad++; want[a] = -2; } else { m->in[a] = (int8_t)want[a]; set++; }
++    }
++    for (int a = 0; a < CM_PACTS; a++) {
++        if (want[a] != -2) continue;
++        for (int b = 0; b < CM_PACTS; b++) if (want[b] >= 0 && want[b] == m->in[a]) { m->in[a] = -1; break; }
++    }
++    if (refused) *refused = bad;
++    return set;
++}
++// An input for a button; the button that had it takes this one's old input (the two swap). 0 when the input is reserved
++static inline int cm_padmap_bind(cm_padmap *m, int act, int in) {
++    if (act < 0 || act >= CM_PACTS || cm_in_reserved(in)) return 0;
++    int old = m->in[act];
++    for (int a = 0; a < CM_PACTS; a++) if (a != act && m->in[a] == in) m->in[a] = (int8_t)old;
++    m->in[act] = (int8_t)in;
++    return 1;
++}
++// The NpadButtons of the inputs held (bit i of held: input i down)
++static inline uint64_t cm_padmap_buttons(const cm_padmap *m, uint32_t held) {
++    uint64_t b = 0;
++    for (int a = 0; a < CM_PACTS; a++) if (m->in[a] >= 0 && m->in[a] < CM_INS && (held >> m->in[a] & 1)) b |= 1ull << a;
++    return b;
++}
++// A controller that reports Switch buttons in the default layout (the Mac's raw HID pads) as the inputs held, so the map applies to it too
++static inline uint32_t cm_default_held(uint64_t buttons) {
++    cm_padmap d; cm_padmap_default(&d); uint32_t h = 0;
++    for (int a = 0; a < CM_PACTS; a++) if (buttons >> a & 1) h |= 1u << d.in[a];
++    return h;
++}
++
++// ---------- The whole file ----------
++typedef struct { cm_keymap keys; cm_padmap pad; int pad_custom; char p1[64]; } cm_controls;
++// Reads the text (NULL: no file): the keys, the "pad" object (pad_custom 0 without one) and player 1. *refused counts the refusals of both
++static inline void cm_controls_parse(cm_controls *c, const char *t, int *refused) {
++    int rk = 0, rp = 0;
++    cm_keymap_parse(&c->keys, t, &rk);
++    c->pad_custom = cm_padmap_parse(&c->pad, t, &rp) >= 0;
++    c->p1[0] = 0; if (t) cm_json_str(t, "player1_mac", c->p1, sizeof c->p1);
++    if (refused) *refused = rk + rp;
++}
++// The file's text: the version, the keys, the "pad" object when one was chosen, player 1, and the Windows build's player 1 fields from the old text (old may be
++// NULL). The length written, or -1 when it does not fit
++static inline int cm_controls_json(const cm_controls *c, const char *old, char *out, size_t cap) {
++    size_t o = 0; int n;
++    #define CM_PUT(...) do { n = snprintf(out + o, cap - o, __VA_ARGS__); if (n < 0 || (size_t)n >= cap - o) return -1; o += (size_t)n; } while (0)
++    CM_PUT("{\n    \"version\":  1,\n");
++    for (int i = 0; i < CM_ACTS; i++) CM_PUT("    \"%s\":  %d,\n", cm_act_names[i], (int)c->keys.key[i]);
++    if (c->pad_custom) {
++        CM_PUT("    \"pad\":  {");
++        for (int a = 0; a < CM_PACTS; a++) CM_PUT("%s\"%s\": \"%s\"", a ? ", " : "", cm_act_names[a], c->pad.in[a] >= 0 && c->pad.in[a] < CM_INS ? cm_in_names[c->pad.in[a]] : "none");
++        CM_PUT("},\n");
++    }
++    char p1[64]; cm_name_clean(c->p1, p1, sizeof p1);
++    CM_PUT("    \"player1_mac\":  \"%s\"", p1);
++    static const char *const keep[] = {"player1", "player1_name"};
++    for (int i = 0; i < 2; i++) { char v[128]; if (old && cm_json_str(old, keep[i], v, sizeof v)) CM_PUT(",\n    \"%s\":  \"%s\"", keep[i], v); }
++    CM_PUT("\n}\n");
++    #undef CM_PUT
++    return (int)o;
++}
+diff --git a/dm/host/controls_state.h b/dm/host/controls_state.h
+new file mode 100644
+index 0000000..fd74222
+--- /dev/null
++++ b/dm/host/controls_state.h
+@@ -0,0 +1,69 @@
++// A front end's controls.json and the Settings window's capture, shared by the Mac (front_mac.m) and the iPhone (DmGamepad.m): one includer per program, main thread only.
++// The map in use is g_ctl; controls_load reads the file at start, controls_save writes it after every change (keeping the Windows build's player 1 fields).
++// The capture (front_capture): the next key or controller input goes to the Settings window instead of the game; Esc cancels, 8 s without one too
++#pragma once
++#import <Foundation/Foundation.h>
++#include "controls_front.h"
++#include "dm.h"
++
++static cm_controls g_ctl;
++static char g_ctl_path[1024];
++static void controls_load(const char *path) {
++    snprintf(g_ctl_path, sizeof g_ctl_path, "%s", path);
++    NSData *d = [NSData dataWithContentsOfFile:@(g_ctl_path)];
++    char *t = d.length && d.length < (1u << 20) ? strndup(d.bytes, d.length) : NULL;
++    int bad = 0; cm_controls_parse(&g_ctl, t, &bad);
++    if (!t) LOG("front end: no %s: the default keys and controller layout", g_ctl_path);
++    else LOG("front end: controls from %s: %s%s%s%s (%d entries refused)", g_ctl_path, g_ctl.pad_custom ? "the keys and a controller map" : "the keys, the controllers' own layout",
++             g_ctl.p1[0] ? ", player 1 is '" : "", g_ctl.p1, g_ctl.p1[0] ? "' when it connects" : "", bad);
++    free(t);
++}
++static void controls_save(void) {
++    NSData *od = [NSData dataWithContentsOfFile:@(g_ctl_path)];
++    char *old = od.length && od.length < (1u << 20) ? strndup(od.bytes, od.length) : NULL;
++    char buf[8192]; int n = cm_controls_json(&g_ctl, old, buf, sizeof buf); free(old);
++    if (n < 0) { LOG("[RED] front end: controls.json does not fit its buffer: not written"); return; }
++    NSError *err = nil;
++    if (![[NSData dataWithBytes:buf length:(NSUInteger)n] writeToFile:@(g_ctl_path) options:NSDataWritingAtomic error:&err])
++        LOG("[RED] front end: %s could not be written: %s", g_ctl_path, err.localizedDescription.UTF8String);
++    else LOG("front end: controls saved to %s", g_ctl_path);
++}
++static int p1_match(const char *name) { char n[64]; cm_name_clean(name, n, sizeof n); return g_ctl.p1[0] && !strcmp(n, g_ctl.p1); }
++
++static int g_cap;   // FRONT_CAP_*, 0 when nothing is captured
++static void (^g_cap_done)(int value, const void *owner);
++static NSTimer *g_cap_timer;
++static int g_cap_swallow = -1;   // the captured controller input, left out until it is released (it would press its new button at once)
++static void capture_end(int value, const void *owner) {
++    void (^done)(int, const void *) = g_cap_done;
++    [g_cap_timer invalidate]; g_cap_timer = nil; g_cap = 0; g_cap_done = nil;
++    if (done) done(value, owner);
++}
++static void capture_start(int kind, void (^done)(int value, const void *owner)) {
++    if (g_cap) capture_end(-1, NULL);
++    g_cap = kind; g_cap_done = [done copy];
++    g_cap_timer = [NSTimer scheduledTimerWithTimeInterval:8 repeats:NO block:^(NSTimer *tm) { (void)tm; capture_end(-2, NULL); }];
++}
++void front_capture_cancel(void) { if (g_cap) capture_end(-1, NULL); }
++const cm_controls *front_controls(void) { return &g_ctl; }
++const char *front_controls_path(void) { return g_ctl_path; }
++// Each controller's inputs at its last read: a capture takes an input that goes down, not one already held
++static struct { const void *owner; uint32_t held; } g_pad_prev[16];
++static uint32_t pad_prev_swap(const void *owner, uint32_t held) {
++    int k = -1;
++    for (int i = 0; i < 16 && k < 0; i++) if (g_pad_prev[i].owner == owner) k = i;
++    for (int i = 0; i < 16 && k < 0; i++) if (!g_pad_prev[i].owner) k = i;
++    if (k < 0) { memmove(g_pad_prev, g_pad_prev + 1, sizeof g_pad_prev - sizeof *g_pad_prev); k = 15; g_pad_prev[k].held = 0; }
++    uint32_t old = g_pad_prev[k].owner == owner ? g_pad_prev[k].held : 0;
++    g_pad_prev[k].owner = owner; g_pad_prev[k].held = held;
++    return old;
++}
++// A controller's inputs held: 1 when the capture takes them (the game sees no buttons from it meanwhile). *pressed: the inputs that went down at this read
++static int pad_capture(const void *owner, uint32_t *in, uint32_t *pressed) {
++    uint32_t fresh = *in & ~pad_prev_swap(owner, *in);
++    if (pressed) *pressed = fresh;
++    if (g_cap_swallow >= 0) { if (*in >> g_cap_swallow & 1) *in &= ~(1u << g_cap_swallow); else g_cap_swallow = -1; }
++    if (g_cap != FRONT_CAP_PAD && g_cap != FRONT_CAP_P1) return 0;
++    if (fresh) { int b = __builtin_ctz(fresh); g_cap_swallow = b; capture_end(g_cap == FRONT_CAP_PAD ? b : 0, owner); }
++    return 1;
++}
 diff --git a/dm/host/coop.h b/dm/host/coop.h
 new file mode 100644
 index 0000000..171a7e2
@@ -4482,10 +5232,28 @@ index cd517ba..f177c35 100644
  // Save not written (called by the host's hle_fs.c; the iOS front end provides a strong implementation of the same name that shows the native prompt "Not enough storage. Progress was not saved"; the default weak implementation only logs).
  // Timing: when a save write fails (disk full etc.) within one of the game's save transactions (between two Commits), so that this Commit is refused and the previously committed save is unchanged, it is called once per refused transaction;
 diff --git a/dm/host/front_mac.m b/dm/host/front_mac.m
-index 0834238..f77bb7d 100644
+index 0834238..38ca797 100644
 --- a/dm/host/front_mac.m
 +++ b/dm/host/front_mac.m
-@@ -106,9 +106,28 @@ static void cursor_hide_for_input(void) {
+@@ -6,6 +6,8 @@
+ // safe mode, values, details and the import of cheat files (see the code below).
+ // Key map (Nintendo layout): WASD left stick, arrow keys D-pad, J=A K=B U=X I=Y, Q=L E=R, Z=ZL C=ZR, F=press left stick G=press right stick, Return=+ Tab=−, Space=shake the controller.
+ // Controllers: face buttons as on the iPhone, by position (right A, bottom B, top X, left Y) or on a Nintendo pad by its labels (pad_apple.h), shoulders L R, triggers ZL ZR, Menu + Options −, both sticks and their presses.
++// Both are the defaults of controls.json (controls_map.h), read at start from the settings folder ($DM_ROOT, or DM_KEYMAP=<file>): keys by position, one controller map
++// for every controller, the controller that takes player 1. The Settings window (controls_mac.m: F1, or Settings… ⌘, in the app menu) changes and writes it.
+ // Each controller is a player of its own (local co-op): the first one connected is player 1, together with the keyboard, the next player 2, and so on up to 8 (pad_slots.h);
+ // DM_PAD_MERGE=1 merges every controller into player 1 instead, DM_KBD_PLAYER=own makes the keyboard player 1 on its own, with the controllers from player 2 on.
+ #import <Cocoa/Cocoa.h>
+@@ -22,6 +24,8 @@
+ #include "motion_pro_mac.h"
+ #include "pad_apple.h"
+ #include "pad_hid_mac.h"
++#include "controls_mac.h"
++#include "controls_state.h"
+ #include <signal.h>
+ #include <math.h>
+ #include <sys/stat.h>
+@@ -106,30 +110,51 @@ static void cursor_hide_for_input(void) {
      NSView *v = g_win.contentView;
      if (NSPointInRect([v convertPoint:g_win.mouseLocationOutsideOfEventStream fromView:nil], v.bounds)) [NSCursor setHiddenUntilMouseMoves:YES];
  }
@@ -4511,19 +5279,119 @@ index 0834238..f77bb7d 100644
  static void push(void) {
      int32_t lx = (g_d - g_a) * 32767, ly = (g_w - g_s) * 32767;
 -    dm_input_set(g_btn, lx, ly, 0, 0);
+-}
+-static int key_bit(unsigned short code) {
+-    switch (code) {
+-        case 38: return 0;  case 40: return 1;  case 32: return 2;  case 34: return 3;    // J K U I → A B X Y
+-        case 3: return 4;   case 5: return 5;                                            // F G → press stick
+-        case 12: return 6;  case 14: return 7;  case 6: return 8;   case 8: return 9;    // Q E Z C → L R ZL ZR
+-        case 36: return 10; case 48: return 11;                                          // Return Tab → + −
+-        case 123: return 12; case 126: return 13; case 124: return 14; case 125: return 15; // ← ↑ → ↓
+-    }
+-    return -1;
 +    dm_input_set(g_btn | g_look_btn, lx, ly, 0, 0);
  }
- static int key_bit(unsigned short code) {
-     switch (code) {
-@@ -123,6 +142,7 @@ static int key_bit(unsigned short code) {
  static void on_key(NSEvent *e, int down) {
      if (!g_input_on) return;
      unsigned short c = e.keyCode;
+-    switch (c) { case 13: g_w = down; break; case 0: g_a = down; break; case 1: g_s = down; break; case 2: g_d = down; break; }
+-    int b = key_bit(c);
+-    uint64_t m = b >= 0 ? 1ull << b : c == 49 ? DM_BTN_SHAKE : 0;   // Space: shaken while held
+-    g_btn = down ? (g_btn | m) : (g_btn & ~m);
+-    if (down && (m || c == 13 || c == 0 || c == 1 || c == 2)) cursor_hide_for_input();   // a key the game takes (WASD: the left stick)
 +    if (c == 53 && g_look_cap) { if (down) { look_capture(0); g_look_btn = 0; push(); } return; }   // Esc lets the mouse go (pointer look)
-     switch (c) { case 13: g_w = down; break; case 0: g_a = down; break; case 1: g_s = down; break; case 2: g_d = down; break; }
-     int b = key_bit(c);
-     uint64_t m = b >= 0 ? 1ull << b : c == 49 ? DM_BTN_SHAKE : 0;   // Space: shaken while held
-@@ -219,6 +239,7 @@ static void input_release(void) {
++    int a = cm_keymap_action(&g_ctl.keys, cm_usage_of_kvk(c));
++    if (a < 0) return;
++    if (a >= CM_ACT_STICK_UP && a <= CM_ACT_STICK_RIGHT) *(a == CM_ACT_STICK_UP ? &g_w : a == CM_ACT_STICK_LEFT ? &g_a : a == CM_ACT_STICK_DOWN ? &g_s : &g_d) = down;
++    else { uint64_t m = a == CM_ACT_SHAKE ? DM_BTN_SHAKE : 1ull << a; g_btn = down ? (g_btn | m) : (g_btn & ~m); }   // the shake: shaken while held
++    if (down) cursor_hide_for_input();
+     push();
+ }
++// A modifier key (Shift, Control, Option; Command's shortcuts belong to the menu bar): AppKit reports it as a change of the modifier flags, each side by its own
++// device bit (IOLLEvent.h NX_DEVICE*KEYMASK). 1 down, 0 up, -1 not one of these
++static int modifier_down(NSEvent *e) {
++    NSEventModifierFlags f = e.modifierFlags;
++    switch (e.keyCode) {
++        case 56: return (f & 0x02) != 0;  case 60: return (f & 0x04) != 0;     // left, right Shift
++        case 59: return (f & 0x01) != 0;  case 62: return (f & 0x2000) != 0;   // left, right Control
++        case 58: return (f & 0x20) != 0;  case 61: return (f & 0x40) != 0;     // left, right Option
++    }
++    return -1;
++}
+ 
+ // Physical controllers (GameController) go to dm_pad_set_player, mapped as the iPhone's (DmGamepad.m read_pad, same layout); player 1's is ORed with the keyboard, a stick takes
+ // whichever is deflected more (hle_hid.c). DM_KEYS uses player 1's path, so player 1's controller touched during a script takes it over.
+@@ -137,6 +162,7 @@ static void on_key(NSEvent *e, int down) {
+ // player n on its own npad while the slot is held (dm_pad_players). A one-player game that supports only No1 / Handheld still sees every controller as player 1 (hle_hid.c).
+ // With DM_PAD_MERGE=1 every controller is player 1, as before (the last one moved wins; when the last one goes away its buttons and sticks are released)
+ static pad_slots g_slots;
++static const char g_kbd_tok = 0;   // the keyboard's slot owner with DM_KBD_PLAYER=own
+ static GCController *g_held[DM_PLAYERS];   // the controller of each slot, kept alive while it holds it (the slot table keys on its pointer)
+ static int g_merge, g_kbd_own;
+ static int32_t pad_axis(float v) { return (int32_t)(fmaxf(-1.f, fminf(1.f, v)) * DM_STICK_MAX); }
+@@ -150,12 +176,8 @@ static void pad_read(GCExtendedGamepad *g) {
+     if (!g_input_on) return;
+     int p = g_merge ? 0 : pad_slot_of(&g_slots, (__bridge const void *)g.controller); if (p < 0) return;
+     dm_haptics_apple_controller(p, g.controller);
+-    uint64_t m = dm_pad_face(g);   // by position, a Nintendo pad by its labels
+-    #define K(btn, bit) if (btn.isPressed) m |= bit
+-    K(g.leftShoulder, DM_BTN_L); K(g.rightShoulder, DM_BTN_R); K(g.leftTrigger, DM_BTN_ZL); K(g.rightTrigger, DM_BTN_ZR);
+-    K(g.buttonMenu, DM_BTN_PLUS); K(g.buttonOptions, DM_BTN_MINUS); K(g.leftThumbstickButton, DM_BTN_LS); K(g.rightThumbstickButton, DM_BTN_RS);   // nil on pads without them: not pressed
+-    K(g.dpad.left, DM_BTN_LEFT); K(g.dpad.up, DM_BTN_UP); K(g.dpad.right, DM_BTN_RIGHT); K(g.dpad.down, DM_BTN_DOWN);
+-    #undef K
++    uint32_t in = dm_pad_inputs(g);   // by position, a Nintendo pad by its labels
++    uint64_t m = pad_capture((__bridge const void *)g.controller, &in, NULL) ? 0 : cm_padmap_buttons(&g_ctl.pad, in);   // controls_state.h: the map, the capture
+     pad_set(p, m, pad_axis(g.leftThumbstick.xAxis.value), pad_axis(g.leftThumbstick.yAxis.value), pad_axis(g.rightThumbstick.xAxis.value), pad_axis(g.rightThumbstick.yAxis.value));
+ }
+ // Home and Capture: without this macOS takes them as system gestures (Home opens the Games app); the host gives them no function
+@@ -170,6 +192,26 @@ static void pro_players_changed(GCController *gone) {
+     dm_motion_pro_players(count, player);
+ }
+ static void pro_devices_changed(void) { pro_players_changed(nil); }
++// Player 1 chosen (the Settings window, or controls.json's "player1_mac" when that controller connects): it takes slot 0 and the old player 1 its slot. Every
++// per-player link moves with them (the motion sensors, rumble, what the game reads), and both are read again
++static void pad_make_first(const void *owner) {
++    int p = g_merge ? -1 : pad_slot_of(&g_slots, owner); if (p <= 0) return;
++    const void *was = g_slots.owner[0];
++    if (pad_slot_first(&g_slots, owner, g_kbd_own ? &g_kbd_tok : NULL) < 0) { LOG("front end: the keyboard keeps player 1 (DM_KBD_PLAYER=own)"); return; }
++    GCController *a = g_held[p], *b = g_held[0];   // a: the chosen controller when it is a GameController one; b: the old player 1's
++    g_held[0] = a; g_held[p] = b;
++    if (a) { dm_motion_detach(a, p); dm_motion_attach(a, 0); }
++    if (b) { dm_motion_detach(b, 0); dm_motion_attach(b, p); }
++    dm_haptics_apple_controller(0, a); dm_haptics_apple_controller(p, b);
++    dm_pad_set_player(0, 0, 0, 0, 0, 0); dm_pad_set_player(p, 0, 0, 0, 0, 0);
++    dm_pad_players(pad_slot_mask(&g_slots));
++    for (hid_pad *d = g_hidpads; d; d = d->next) if (d == owner || d == was) hidpad_read(d);
++    if (a.extendedGamepad) pad_read(a.extendedGamepad);
++    if (b.extendedGamepad) pad_read(b.extendedGamepad);
++    pro_players_changed(nil);
++    char nb[16]; npad_name(0, nb, sizeof nb);
++    LOG("front end: controller '%s' is player 1 now (npad %s)%s%s%s", g_slots.last[0], nb, was ? ", '" : "", was ? g_slots.last[p] : "", was ? "' took its old place" : "");
++}
+ // DM_PAD_MERGE: whether a controller still plays player 1 (gone: one just removed, not counted), a GameController one or a raw HID pad (pad_hid_mac.h)
+ static int merge_pads_left(GCController *gone) {
+     if (g_hidpads) return 1;
+@@ -188,6 +230,7 @@ static void pads_changed(GCController *gone) {
+         if (gone) dm_motion_detach(gone, 0);
+         if (!any) { if (!g_hidpads) dm_pad_set(0, 0, 0, 0, 0); dm_haptics_apple_controller(0, nil); }   // a raw HID pad still plays player 1 (pad_hid_mac.h)
+         pro_players_changed(gone);
++        controls_window_pads_changed();
+         return;
+     }
+     NSArray<GCController *> *now = GCController.controllers; char nb[16];
+@@ -207,9 +250,11 @@ static void pads_changed(GCController *gone) {
+         dm_motion_attach(c, p);
+         npad_name(p, nb, sizeof nb); LOG("controller '%s' connected: player %d (npad %s)%s", pad_name(c), p + 1, nb, c.motion.hasRotationRate ? ", with motion (gyro)" : "");
+         pad_read(c.extendedGamepad);
++        if (p > 0 && p1_match(pad_name(c))) pad_make_first((__bridge const void *)c);
+     }
+     dm_pad_players(pad_slot_mask(&g_slots));
+     pro_players_changed(gone);
++    controls_window_pads_changed();
+ }
+ // Focus: a window that is no longer key sees no key-up, mouse-up or controller release, so whatever is held when it loses focus (another app, the text box, minimized) would
+ // stay pressed in the game. The front end releases only what it pressed itself: scripted buttons and sticks have their own path, and the touch is also DM_KEYS / DM_CTL's (hle_hid.c).
+@@ -219,6 +264,7 @@ static void input_release(void) {
      [NSCursor setHiddenUntilMouseMoves:NO];
      g_input_on = 0;
      dm_motion_pro_active(0);
@@ -4531,7 +5399,97 @@ index 0834238..f77bb7d 100644
      g_btn = 0; g_w = g_a = g_s = g_d = 0; push();
      if (g_mouse_down) { g_mouse_down = 0; dm_touch_set(NULL, 0); }
      if (g_merge) { if (merge_pads_left(nil)) dm_pad_set(0, 0, 0, 0, 0); return; }
-@@ -273,8 +294,19 @@ static void pads_start(void) {
+@@ -237,7 +283,8 @@ static void hidpad_read(hid_pad *d) {
+     if (!g_input_on) return;
+     int p = g_merge ? 0 : pad_slot_of(&g_slots, d); if (p < 0) return;
+     int32_t s[4]; pad_hid_sticks(&d->st, s);
+-    pad_set(p, pad_hid_buttons(&d->st), s[0], s[1], s[2], s[3]);
++    uint32_t in = cm_default_held(pad_hid_buttons(&d->st));   // its buttons in the default layout, as the inputs that press them, so the map applies to it too
++    pad_set(p, pad_capture(d, &in, NULL) ? 0 : cm_padmap_buttons(&g_ctl.pad, in), s[0], s[1], s[2], s[3]);
+ }
+ static void hidpad_attach(hid_pad *d) {
+     int p = g_merge ? 0 : pad_slot_take(&g_slots, d, d->name); char nb[16];
+@@ -245,6 +292,8 @@ static void hidpad_attach(hid_pad *d) {
+     npad_name(p, nb, sizeof nb); LOG("controller '%s' (HID) connected: player %d (npad %s)", d->name, p + 1, nb);
+     if (!g_merge) dm_pad_players(pad_slot_mask(&g_slots));   // merged, every controller is player 1, as pads_changed has it
+     hidpad_read(d);
++    if (p > 0 && p1_match(d->name)) pad_make_first(d);
++    controls_window_pads_changed();
+ }
+ static void hidpad_detach(hid_pad *d) {   // d is already off g_hidpads
+     if (g_merge) {   // as pads_changed: released when the last controller goes away
+@@ -256,12 +305,12 @@ static void hidpad_detach(hid_pad *d) {   // d is already off g_hidpads
+     npad_name(p, nb, sizeof nb); LOG("controller '%s' (HID) disconnected: player %d (npad %s) is free", d->name, p + 1, nb);
+     dm_pad_set_player(p, 0, 0, 0, 0, 0);   // nothing stays pressed
+     dm_pad_players(pad_slot_mask(&g_slots));
++    controls_window_pads_changed();
+ }
+ static void pads_start(void) {
+     const char *e = getenv("DM_PAD_MERGE"); g_merge = e && atoi(e);
+     e = getenv("DM_KBD_PLAYER"); g_kbd_own = !g_merge && e && !strcmp(e, "own");
+-    static const char kbd = 0;
+-    if (g_kbd_own) pad_slot_take(&g_slots, &kbd, "keyboard");   // holds player 1 for good
++    if (g_kbd_own) pad_slot_take(&g_slots, &g_kbd_tok, "keyboard");   // holds player 1 for good
+     LOG("front end: %s", g_merge ? "every controller is player 1 (DM_PAD_MERGE)" : g_kbd_own ? "the keyboard is player 1, each controller a player of its own from player 2 on (DM_KBD_PLAYER=own)"
+                                                                            : "each controller is a player of its own, the keyboard plays with player 1");
+     pads_changed(nil);
+@@ -269,12 +318,75 @@ static void pads_start(void) {
+     hidpad_start();
+ }
+ 
++// ---------- controls.json and the Settings window (controls_mac.h) ----------
++static void front_controls_load(void) {   // controls.json: DM_KEYMAP, else the launcher's settings folder (DM_ROOT), else here
++    const char *e = getenv("DM_KEYMAP"), *root = getenv("DM_ROOT"); char path[1024];
++    if (e && *e) snprintf(path, sizeof path, "%s", e);
++    else snprintf(path, sizeof path, "%s%scontrols.json", root && *root ? root : "", root && *root ? "/" : "");
++    controls_load(path);
++}
++// What the keyboard and the controllers hold, let go (a new map, a capture), so nothing stays pressed under its old meaning; pads_reread reads the controllers again
++static void buttons_release(void) {
++    g_btn = 0; g_w = g_a = g_s = g_d = 0; push();
++    if (g_merge) { dm_pad_set(0, 0, 0, 0, 0); return; }
++    for (int p = 0; p < DM_PLAYERS; p++) if (g_slots.owner[p] && g_slots.owner[p] != &g_kbd_tok) dm_pad_set_player(p, 0, 0, 0, 0, 0);
++}
++static void pads_reread(void) {
++    if (!g_input_on) return;
++    if (g_merge) { for (GCController *c in GCController.controllers) if (c.extendedGamepad) pad_read(c.extendedGamepad); }
++    else for (int p = 0; p < DM_PLAYERS; p++) if (g_held[p].extendedGamepad) pad_read(g_held[p].extendedGamepad);
++    for (hid_pad *d = g_hidpads; d; d = d->next) hidpad_read(d);
++}
++void front_controls_set(const cm_controls *c) { g_ctl = *c; buttons_release(); pads_reread(); controls_save(); }
++void front_player1(const void *owner) {
++    if (!owner) { g_ctl.p1[0] = 0; LOG("front end: no controller remembered as player 1"); controls_save(); return; }
++    if (g_merge) { LOG("front end: every controller is player 1 (DM_PAD_MERGE)"); return; }
++    pad_make_first(owner);
++    if (pad_slot_of(&g_slots, owner) != 0) return;
++    cm_name_clean(g_slots.last[0], g_ctl.p1, sizeof g_ctl.p1); controls_save();
++    controls_window_pads_changed();
++}
++int front_pads(front_pad_entry *out, int max) {
++    int n = 0;
++    if (g_merge) {
++        for (GCController *c in GCController.controllers) if (c.extendedGamepad && n < max) { out[n] = (front_pad_entry){(__bridge const void *)c, 0, dm_pad_type(c), ""}; snprintf(out[n].name, sizeof out[n].name, "%s", pad_name(c)); n++; }
++        for (hid_pad *d = g_hidpads; d && n < max; d = d->next) { out[n] = (front_pad_entry){d, 0, CM_PAD_UNKNOWN, ""}; snprintf(out[n].name, sizeof out[n].name, "%s", d->name); n++; }
++        return n;
++    }
++    for (int p = 0; p < DM_PLAYERS && n < max; p++) {
++        const void *o = g_slots.owner[p]; if (!o || o == &g_kbd_tok) continue;
++        out[n] = (front_pad_entry){o, p, g_held[p] ? dm_pad_type(g_held[p]) : CM_PAD_UNKNOWN, ""};
++        snprintf(out[n].name, sizeof out[n].name, "%s", g_slots.last[p]); n++;
++    }
++    return n;
++}
++void front_capture(int kind, void (^done)(int value, const void *owner)) { buttons_release(); capture_start(kind, done); }
++// A key for the capture (from the game window or the Settings window): a key or a modifier going down; Esc cancels
++static void capture_key(NSEvent *e) {
++    int down = e.type == NSEventTypeKeyDown ? !e.isARepeat : e.type == NSEventTypeFlagsChanged ? modifier_down(e) == 1 : 0;
++    if (!down) return;
++    if (e.keyCode == 53) capture_end(-1, NULL);
++    else if (g_cap == FRONT_CAP_KEY) { int u = cm_usage_of_kvk(e.keyCode); if (u) capture_end(u, NULL); }
++}
++void front_fullscreen_set(int on) { if (g_win && !!(g_win.styleMask & NSWindowStyleMaskFullScreen) != !!on) [g_win toggleFullScreen:nil]; }
++
+ // Mouse as a single-point touchscreen (front.h dm_touch_set): left button down / drag = finger 0, release = lifted. The content view takes the clicks,
  // not a window-wide event monitor, so clicks on the title bar, the window buttons and the resize edges still reach AppKit.
  @interface DmGameView : NSView @end
  @implementation DmGameView
@@ -4552,7 +5510,7 @@ index 0834238..f77bb7d 100644
      if (!g_input_on) return;
      NSPoint p = [self convertPoint:e.locationInWindow fromView:nil]; NSSize b = self.bounds.size;
      double w = b.width, h = b.height;
-@@ -284,7 +316,7 @@ - (void)mouseDragged:(NSEvent *)e {
+@@ -284,7 +396,7 @@ static void pads_start(void) {
      dm_touch t = {0, (float)fmin(fmax((p.x - x0) / w, 0), 0.999), (float)fmin(fmax(1 - (p.y - y0) / h, 0), 0.999)};   // The AppKit view origin is at bottom left, the touchscreen origin is at top left
      dm_touch_set(&t, 1); g_mouse_down = 1;
  }
@@ -4561,7 +5519,7 @@ index 0834238..f77bb7d 100644
  // The drawable follows the view in pixels: a layer assigned to a layer-backed view kept the drawable at the first window's 1280x720 in fullscreen too, so the game picture was
  // scaled down to it and up again by the compositor
  - (void)fitDrawable {
-@@ -1182,6 +1214,8 @@ void front_run(void (*guest)(void)) {
+@@ -1182,6 +1294,8 @@ void front_run(void (*guest)(void)) {
          g_layer.contentsScale = win.backingScaleFactor;
          if (getenv("DM_METAL_HUD") && atoi(getenv("DM_METAL_HUD"))) { g_layer.developerHUDProperties = @{@"mode": @"default"}; LOG("front end: Metal performance HUD on (DM_METAL_HUD)"); }   // Apple's HUD over the game: frame rate, frame and GPU time, memory
          v.layer = g_layer; [(DmGameView *)v fitDrawable];
@@ -4570,6 +5528,33 @@ index 0834238..f77bb7d 100644
          [win center];
          [win makeKeyAndOrderFront:nil];
          screen_refresh(win.screen ?: NSScreen.mainScreen);
+@@ -1197,6 +1311,8 @@ void front_run(void (*guest)(void)) {
+         // Main menu: AppKit runs ⌘ shortcuts only through menu items, so ⌘Q quits and ⌃⌘F toggles fullscreen from here (AppKit shows the item as Globe-F and keeps ⌃⌘F as a hidden twin)
+         NSMenu *bar = [NSMenu new], *app = [NSMenu new], *wm = [[NSMenu alloc] initWithTitle:@"Window"];
+         [[bar addItemWithTitle:@"" action:nil keyEquivalent:@""] setSubmenu:app];
++        [app addItem:controls_menu_item()];   // Settings… (⌘,): the keys, the controllers, the graphics (controls_mac.m); F1 opens it too
++        [app addItem:NSMenuItem.separatorItem];
+         [app addItemWithTitle:@"Quit " DM_GAME_NAME action:@selector(terminate:) keyEquivalent:@"q"];
+         // Cheats (hle_cheats.c): the rows rebuild on every open through the delegate, the same rows the file reload changes
+         g_cheats_menu = [DmCheatsMenuDelegate new];
+@@ -1244,10 +1360,15 @@ void front_run(void (*guest)(void)) {
+                 if (!c.extendedGamepad || g_merge) LOG("controller %s: %s%s", conn ? "connected" : "disconnected", pad_name(c), c.extendedGamepad ? "" : " (no extended gamepad profile: not used)");
+                 pads_changed(conn ? nil : c); }];
+         dm_haptics_apple_init();
++        front_controls_load();
+         pads_start();
+-        [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown | NSEventMaskKeyUp handler:^NSEvent *(NSEvent *e) {
++        [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown | NSEventMaskKeyUp | NSEventMaskFlagsChanged handler:^NSEvent *(NSEvent *e) {
++            int cmd = e.type == NSEventTypeKeyDown && (e.modifierFlags & NSEventModifierFlagCommand);
++            if (g_cap && !cmd && (e.window == win || controls_window_is(e.window))) { capture_key(e); return e.type == NSEventTypeFlagsChanged ? e : nil; }   // the Settings window's capture
+             if (e.window != win) return e;   // Only swallow keys for the game window; other windows such as the software keyboard input box receive typing as usual
+-            if (e.type == NSEventTypeKeyDown && (e.modifierFlags & NSEventModifierFlagCommand)) return e;   // ⌘ shortcuts go to the menu; a key released while ⌘ is held still reaches the game, or it would stay pressed
++            if (e.type == NSEventTypeFlagsChanged) { int d = modifier_down(e); if (d >= 0) on_key(e, d); return e; }   // Shift, Control, Option as game keys
++            if (cmd) return e;   // ⌘ shortcuts go to the menu; a key released while ⌘ is held still reaches the game, or it would stay pressed
++            if (e.type == NSEventTypeKeyDown && e.keyCode == 0x7A) { if (!e.isARepeat) controls_window_toggle(); return nil; }   // F1: the Settings window
+             if (!e.isARepeat) on_key(e, e.type == NSEventTypeKeyDown);
+             return nil;   // Swallow it to avoid the system beep
+         }];
 diff --git a/dm/host/hle.c b/dm/host/hle.c
 index de79bc9..e09a927 100644
 --- a/dm/host/hle.c
@@ -8326,20 +9311,402 @@ index 4f440a0..32498e1 100644
          default: v = 0; break;
          }
          regs[0] = 0; regs[1] = v; return 0;
+diff --git a/dm/host/pad_apple.h b/dm/host/pad_apple.h
+index 65fdd53..d26b0ea 100644
+--- a/dm/host/pad_apple.h
++++ b/dm/host/pad_apple.h
+@@ -8,6 +8,7 @@
+ #import <GameController/GameController.h>
+ #include <stdint.h>
+ #include "dm_input.h"
++#include "controls_map.h"
+ 
+ static inline int dm_pad_labelled(GCController *c) {
+     NSString *k = c.productCategory;
+@@ -19,3 +20,28 @@ static inline uint64_t dm_pad_face(GCExtendedGamepad *g) {
+     if (!dm_pad_labelled(g.controller)) { GCControllerButtonInput *t = a; a = b; b = t; t = x; x = y; y = t; }   // by position: right A, bottom B, top X, left Y
+     return (a.isPressed ? DM_BTN_A : 0) | (b.isPressed ? DM_BTN_B : 0) | (x.isPressed ? DM_BTN_X : 0) | (y.isPressed ? DM_BTN_Y : 0);
+ }
++
++// The pad's inputs held as controls.json names them (controls_map.h: by place, so a Nintendo pad's labelled buttons count where they sit), for the map and for
++// the Settings window's capture. With the default map they press the same Switch buttons as dm_pad_face and the fixed list above. Share / Capture, the Elite
++// paddles and the PlayStation touchpad come from the physical input profile, on pads that have them
++static inline uint32_t dm_pad_inputs(GCExtendedGamepad *g) {
++    uint32_t h = 0; int lab = dm_pad_labelled(g.controller);
++    #define H(btn, in) if ((btn).isPressed) h |= 1u << (in)
++    H(g.buttonA, lab ? CM_IN_EAST : CM_IN_SOUTH); H(g.buttonB, lab ? CM_IN_SOUTH : CM_IN_EAST); H(g.buttonX, lab ? CM_IN_NORTH : CM_IN_WEST); H(g.buttonY, lab ? CM_IN_WEST : CM_IN_NORTH);
++    H(g.leftShoulder, CM_IN_LSHOULDER); H(g.rightShoulder, CM_IN_RSHOULDER); H(g.leftTrigger, CM_IN_LT); H(g.rightTrigger, CM_IN_RT);
++    H(g.buttonMenu, CM_IN_START); H(g.buttonOptions, CM_IN_BACK); H(g.buttonHome, CM_IN_GUIDE); H(g.leftThumbstickButton, CM_IN_LSTICK); H(g.rightThumbstickButton, CM_IN_RSTICK);
++    H(g.dpad.up, CM_IN_DUP); H(g.dpad.down, CM_IN_DDOWN); H(g.dpad.left, CM_IN_DLEFT); H(g.dpad.right, CM_IN_DRIGHT);
++    NSDictionary<NSString *, GCControllerButtonInput *> *b = g.controller.physicalInputProfile.buttons;
++    H(b[GCInputButtonShare], CM_IN_MISC1); H(b[GCInputDualShockTouchpadButton], CM_IN_TOUCHPAD);
++    H(b[GCInputXboxPaddleOne], CM_IN_RPADDLE1); H(b[GCInputXboxPaddleTwo], CM_IN_RPADDLE2); H(b[GCInputXboxPaddleThree], CM_IN_LPADDLE1); H(b[GCInputXboxPaddleFour], CM_IN_LPADDLE2);
++    #undef H
++    return h;
++}
++// What the pad prints on its face buttons, for the Settings window's words (controls_map.h cm_in_text)
++static inline int dm_pad_type(GCController *c) {
++    NSString *k = c.productCategory ?: @"";
++    if (dm_pad_labelled(c)) return CM_PAD_NINTENDO;
++    if ([k containsString:@"DualSense"] || [k containsString:@"DualShock"]) return CM_PAD_PLAYSTATION;
++    if ([k containsString:@"Xbox"]) return CM_PAD_XBOX;
++    return CM_PAD_UNKNOWN;
++}
+diff --git a/dm/host/pad_slots.h b/dm/host/pad_slots.h
+index fa7058e..cc1f0fa 100644
+--- a/dm/host/pad_slots.h
++++ b/dm/host/pad_slots.h
+@@ -31,6 +31,15 @@ static int pad_slot_free(pad_slots *s, const void *owner) {
+     int p = pad_slot_of(s, owner); if (p >= 0) s->owner[p] = NULL;
+     return p;
+ }
++// Player 1 chosen (the Settings window, controls.json's "player1_mac"): the owner takes slot 0 and whoever held it takes the owner's old slot, names and all.
++// 0 when it is player 1 now, -1 when it holds no slot or keep (the keyboard with DM_KBD_PLAYER=own) holds slot 0
++static int pad_slot_first(pad_slots *s, const void *owner, const void *keep) {
++    int p = pad_slot_of(s, owner); if (p <= 0) return p;
++    if (keep && s->owner[0] == keep) return -1;
++    const void *o = s->owner[0]; s->owner[0] = owner; s->owner[p] = o;
++    char t[64]; memcpy(t, s->last[0], sizeof t); memcpy(s->last[0], s->last[p], sizeof t); memcpy(s->last[p], t, sizeof t);
++    return 0;
++}
+ static uint32_t pad_slot_mask(const pad_slots *s) {   // bit p: slot p is held
+     uint32_t m = 0; for (int i = 0; i < DM_PLAYERS; i++) if (s->owner[i]) m |= 1u << i;
+     return m;
+diff --git a/dm/host/tests/Makefile b/dm/host/tests/Makefile
+index 3d8aea4..1805c9d 100644
+--- a/dm/host/tests/Makefile
++++ b/dm/host/tests/Makefile
+@@ -12,7 +12,7 @@ QUIET = $(if $(findstring -fsanitize,$(SAN)),,2>/dev/null)
+ GINC = $(if $(strip $(GAME)),-I../gen/$(GAME) -I../../games/$(GAME),$(error GAME is not set: make GAME=<base game title ID>: $(shell python3 ../../games/game.py list | awk -F'\t' '{printf "%s (%s)  ", $$1, $$3}')))
+ $(B)/t_fs $(B)/t_fs_case $(B)/t_fs_commit_list $(B)/t_fs_commit_list_tsan: ../romfs_image.h
+ GAME_H = ../gen/$(GAME)/game_profile.h
+-run: $(B)/t_language $(B)/t_motion $(B)/t_heap_size $(B)/t_touch $(B)/t_gesture $(B)/t_oe $(B)/t_fs $(B)/t_fs_commit_list $(B)/t_thread_leak $(B)/t_fs_case $(B)/t_audio $(B)/t_audio_spsc $(B)/t_swkbd $(B)/t_altstack $(B)/t_condvar $(B)/t_condvar_old $(B)/t_pollwait $(B)/t_pctl $(B)/t_time $(B)/t_shared_font $(B)/t_vorbis $(B)/t_vorbis_divides $(B)/t_hid $(B)/t_haptics $(B)/t_haptics_apple $(B)/t_cheats $(B)/t_pad_hid
++run: $(B)/t_language $(B)/t_motion $(B)/t_heap_size $(B)/t_touch $(B)/t_gesture $(B)/t_oe $(B)/t_fs $(B)/t_fs_commit_list $(B)/t_thread_leak $(B)/t_fs_case $(B)/t_audio $(B)/t_audio_spsc $(B)/t_swkbd $(B)/t_altstack $(B)/t_condvar $(B)/t_condvar_old $(B)/t_pollwait $(B)/t_pctl $(B)/t_time $(B)/t_shared_font $(B)/t_vorbis $(B)/t_vorbis_divides $(B)/t_hid $(B)/t_haptics $(B)/t_haptics_apple $(B)/t_cheats $(B)/t_pad_hid $(B)/t_controls_map
+ 	$(B)/t_language
+ 	$(B)/t_heap_size
+ 	$(B)/t_touch
+@@ -56,6 +56,7 @@ run: $(B)/t_language $(B)/t_motion $(B)/t_heap_size $(B)/t_touch $(B)/t_gesture
+ 	$(B)/t_motion_pro_mac
+ 	TMPDIR="$(abspath $(B))" $(B)/t_hid
+ 	$(B)/t_pad_hid
++	$(B)/t_controls_map
+ 	$(B)/t_haptics
+ 	$(B)/t_haptics_apple
+ 	TMPDIR="$(abspath $(B))" $(B)/t_cheats $(QUIET)
+@@ -318,6 +319,14 @@ tsan-threads-run: $(addprefix $(B)/,$(TSAN_T))
+ 	DM_QOS_MAP=1 $(B)/t_notify_sched --all-peers
+ $(B)/t_pad_hid: t_pad_hid.c ../pad_hid.h ../dm_input.h | $(B)
+ 	$(CLANG) -O1 -g -Wall -Werror -Wno-unused-function -fsanitize=address,undefined -I.. -o $@ t_pad_hid.c
++$(B)/t_controls_map: t_controls_map.c ../controls_map.h ../pad_slots.h ../dm_input.h | $(B)
++	$(CLANG) -O1 -g -Wall -Werror -Wno-unused-function -fsanitize=address,undefined -I.. -o $@ t_controls_map.c
++# The Settings window (controls_mac.m) and the controller reading for controls.json: shows a window, so it needs a logged-in session and is not in run
++.PHONY: controls-gui
++controls-gui: $(B)/t_controls_mac
++	$(B)/t_controls_mac "$(abspath $(B))"
++$(B)/t_controls_mac: t_controls_mac.m ../controls_mac.m ../controls_mac.h ../controls_front.h ../controls_map.h ../pad_apple.h ../dm_input.h $(GAME_H) | $(B)
++	$(CLANG) -O1 -g -Wall -Werror -Wno-unused-function -Wno-deprecated-declarations -fobjc-arc -I.. $(GINC) -o $@ t_controls_mac.m ../controls_mac.m -framework Cocoa -framework GameController -framework Carbon
+ 
+ # Line coverage (../../sanitizers/coverage.mk): make coverage builds every test of run into $(B)/cov with COV_FLAGS, runs them and writes $(B)/cov/coverage.lcov.
+ # It measures, it does not test: make -i runs every test even after one fails (the plain run reports that), so the coverage of the others is kept.
+diff --git a/dm/host/tests/t_controls_mac.m b/dm/host/tests/t_controls_mac.m
+new file mode 100644
+index 0000000..6e645bf
+--- /dev/null
++++ b/dm/host/tests/t_controls_mac.m
+@@ -0,0 +1,155 @@
++// The Mac's controller reading for controls.json (pad_apple.h dm_pad_inputs, on GameController's own made-up controller) and the Settings window
++// (controls_mac.m), driven through its buttons with front_mac.m's side stubbed below. Needs a logged-in session (the window is shown); writes a picture of
++// each page into $TMPDIR (or the folder given as the first argument). make -C dm/host/tests GAME=<id> controls-gui
++#import <Cocoa/Cocoa.h>
++#include "../controls_mac.h"
++#include "../pad_apple.h"
++#include "../dm.h"
++#include "../hle.h"
++
++static int fails;
++#define CHECK(c) do { if (!(c)) { printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); fails++; } } while (0)
++
++// ---- front_mac.m's side, stubbed ----
++static cm_controls S; static int sets, opm = 1, fx, fs;
++static const void *p1owner; static int p1calls;
++static void (^capdone)(int, const void *); static int capkind;
++static int A1, A2;   // two controllers' owners
++const cm_controls *front_controls(void) { return &S; }
++const char *front_controls_path(void) { return "controls.json"; }
++void front_controls_set(const cm_controls *c) { S = *c; sets++; }
++int front_pads(front_pad_entry *out, int max) {
++    if (max < 2) return 0;
++    out[0] = (front_pad_entry){&A2, 0, p1owner == &A1 ? CM_PAD_XBOX : CM_PAD_NINTENDO, ""}; snprintf(out[0].name, 64, "%s", p1owner == &A1 ? "Xbox Wireless Controller" : "Pro Controller");
++    out[1] = (front_pad_entry){&A1, 1, p1owner == &A1 ? CM_PAD_NINTENDO : CM_PAD_XBOX, ""}; snprintf(out[1].name, 64, "%s", p1owner == &A1 ? "Pro Controller" : "Xbox Wireless Controller");
++    if (p1owner == &A1) { out[0].owner = &A1; out[1].owner = &A2; }
++    return 2;
++}
++void front_player1(const void *o) { p1calls++; if (o) p1owner = o; snprintf(S.p1, sizeof S.p1, "%s", !o ? "" : o == &A1 ? "Xbox Wireless Controller" : "Pro Controller"); }
++void front_capture(int k, void (^d)(int, const void *)) { capkind = k; capdone = [d copy]; }
++void front_capture_cancel(void) { void (^d)(int, const void *) = capdone; capdone = nil; if (d) d(-1, NULL); }
++static void captured(int v, const void *owner) { void (^d)(int, const void *) = capdone; capdone = nil; CHECK(d != nil); if (d) d(v, owner); }
++int front_fullscreen(void) { return fs; }
++void front_fullscreen_set(int on) { fs = on; }
++void dm_present_upscale_set(int on) { fx = on; }
++int dm_present_upscale_get(int *supported) { if (supported) *supported = 1; return fx; }
++int dm_opmode(void) { return opm; }
++void dm_set_opmode(int m) { opm = m; }
++
++// ---- the window's controls ----
++static void views(NSView *v, NSMutableArray *out) { [out addObject:v]; for (NSView *s in v.subviews) views(s, out); }
++static id find(NSWindow *w, Class cls, BOOL (^ok)(id)) {
++    NSMutableArray *all = [NSMutableArray new]; views(w.contentView, all);
++    for (id v in all) if ([v isKindOfClass:cls] && (!ok || ok(v))) return v;
++    return nil;
++}
++static NSButton *button_tag(NSWindow *w, NSString *sel, int tag) {
++    return find(w, NSButton.class, ^BOOL(NSButton *b) { return ![b isKindOfClass:NSPopUpButton.class] && b.tag == tag && [NSStringFromSelector(b.action) isEqualToString:sel]; });
++}
++static NSButton *button_title(NSWindow *w, NSString *title) { return find(w, NSButton.class, ^BOOL(NSButton *b) { return [b.title isEqualToString:title]; }); }
++static NSSegmentedControl *segments(NSWindow *w, NSString *sel) {
++    return find(w, NSSegmentedControl.class, ^BOOL(NSSegmentedControl *s) { return [NSStringFromSelector(s.action) isEqualToString:sel]; });
++}
++static void choose(NSSegmentedControl *s, NSInteger i) { s.selectedSegment = i; [NSApp sendAction:s.action to:s.target from:s]; }
++static NSString *status(NSWindow *w) {   // every label's text: the status line is one of them
++    NSMutableArray *all = [NSMutableArray new]; views(w.contentView, all); NSMutableString *s = [NSMutableString new];
++    for (id v in all) if ([v isKindOfClass:NSTextField.class]) { [s appendString:((NSTextField *)v).stringValue]; [s appendString:@" | "]; }
++    return s;
++}
++static void snap(NSWindow *w, NSString *dir, NSString *name) {
++    NSView *v = w.contentView; [v layoutSubtreeIfNeeded]; [w displayIfNeeded];
++    NSBitmapImageRep *r = [v bitmapImageRepForCachingDisplayInRect:v.bounds]; [v cacheDisplayInRect:v.bounds toBitmapImageRep:r];
++    NSString *p = [dir stringByAppendingPathComponent:name];
++    CHECK([[r representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:p atomically:YES]);
++    printf("picture: %s\n", p.UTF8String);
++}
++static void spin(void) { [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.2]]; }
++
++// The fixed list front_mac.m read before controls.json, to compare with the default map
++static uint64_t old_buttons(GCExtendedGamepad *g) {
++    uint64_t m = dm_pad_face(g);
++    #define K(btn, bit) if (btn.isPressed) m |= bit
++    K(g.leftShoulder, DM_BTN_L); K(g.rightShoulder, DM_BTN_R); K(g.leftTrigger, DM_BTN_ZL); K(g.rightTrigger, DM_BTN_ZR);
++    K(g.buttonMenu, DM_BTN_PLUS); K(g.buttonOptions, DM_BTN_MINUS); K(g.leftThumbstickButton, DM_BTN_LS); K(g.rightThumbstickButton, DM_BTN_RS);
++    K(g.dpad.left, DM_BTN_LEFT); K(g.dpad.up, DM_BTN_UP); K(g.dpad.right, DM_BTN_RIGHT); K(g.dpad.down, DM_BTN_DOWN);
++    #undef K
++    return m;
++}
++
++int main(int argc, char **argv) {
++    @autoreleasepool {
++        NSString *dir = argc > 1 ? @(argv[1]) : NSTemporaryDirectory();
++        // ---- a controller's inputs: GameController's made-up controller (not connected), every button alone, then through the default map ----
++        GCController *c = [GCController controllerWithExtendedGamepad]; GCExtendedGamepad *g = c.extendedGamepad;
++        printf("made-up controller: category '%s', labelled %d\n", c.productCategory.UTF8String ?: "", dm_pad_labelled(c));
++        cm_padmap d; cm_padmap_default(&d);
++        CHECK(dm_pad_inputs(g) == 0);
++        NSArray<GCControllerButtonInput *> *btns = @[g.buttonA, g.buttonB, g.buttonX, g.buttonY, g.leftShoulder, g.rightShoulder, g.leftTrigger, g.rightTrigger,
++                                                     g.buttonMenu, g.leftThumbstickButton ?: g.buttonA, g.rightThumbstickButton ?: g.buttonA];
++        if (g.buttonOptions) btns = [btns arrayByAddingObject:g.buttonOptions];
++        int n = 0;
++        for (GCControllerButtonInput *b in btns) {
++            [b setValue:1];
++            uint32_t in = dm_pad_inputs(g);
++            CHECK(__builtin_popcount(in) == 1);
++            CHECK(cm_padmap_buttons(&d, in) == old_buttons(g));
++            [b setValue:0]; n++;
++        }
++        [g.buttonA setValue:1]; CHECK(dm_pad_inputs(g) == 1u << (dm_pad_labelled(c) ? CM_IN_EAST : CM_IN_SOUTH)); [g.buttonA setValue:0];
++        [g.dpad setValueForXAxis:0 yAxis:1]; CHECK(dm_pad_inputs(g) == 1u << CM_IN_DUP && cm_padmap_buttons(&d, dm_pad_inputs(g)) == DM_BTN_UP);
++        [g.dpad setValueForXAxis:-1 yAxis:0]; CHECK(cm_padmap_buttons(&d, dm_pad_inputs(g)) == old_buttons(g)); [g.dpad setValueForXAxis:0 yAxis:0];
++        printf("controller inputs: %d buttons checked against the old list\n", n);
++
++        // ---- the Settings window ----
++        cm_keymap_default(&S.keys); cm_padmap_default(&S.pad);
++        [NSApplication sharedApplication]; [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
++        controls_window_toggle(); spin();
++        NSWindow *w = nil; for (NSWindow *x in NSApp.windows) if ([x.title isEqualToString:@"Settings"]) w = x;
++        CHECK(w && w.visible && controls_window_is(w));
++        if (!w) { printf("no Settings window\n"); return 1; }
++        snap(w, dir, @"settings-keyboard.png");
++        // Keyboard: A takes K, B gets A's J (the swap); Esc refused; nothing pressed
++        [button_tag(w, @"keyClicked:", 0) performClick:nil]; CHECK(capkind == FRONT_CAP_KEY && button_title(w, @"Press a key…"));
++        captured(CM_KEY_K, NULL);
++        CHECK(S.keys.key[0] == CM_KEY_K && S.keys.key[1] == CM_KEY_J && sets == 1);
++        CHECK([status(w) containsString:@"B takes"]);
++        [button_tag(w, @"keyClicked:", 1) performClick:nil]; captured(CM_KEY_ESCAPE, NULL);
++        CHECK(S.keys.key[1] == CM_KEY_J && sets == 1 && [status(w) containsString:@"stays with the game window"]);
++        [button_tag(w, @"keyClicked:", 2) performClick:nil]; captured(-2, NULL); CHECK(sets == 1);
++        [button_tag(w, @"keyClicked:", 3) performClick:nil]; front_capture_cancel(); CHECK(sets == 1 && !capdone);
++        [button_tag(w, @"keyClicked:", CM_ACT_STICK_UP) performClick:nil]; captured(225, NULL);   // Left Shift
++        CHECK(S.keys.key[CM_ACT_STICK_UP] == 225 && sets == 2);
++        snap(w, dir, @"settings-keyboard-changed.png");
++        [button_title(w, @"Reset to defaults") performClick:nil]; CHECK(S.keys.key[0] == CM_KEY_J && S.keys.key[CM_ACT_STICK_UP] == CM_KEY_W);
++        // Controller: player 1 from the list, a button captured for A, player 1 by pressing a button, forget, reset
++        choose(segments(w, @"pageChosen:"), 1); spin();
++        NSPopUpButton *pick = find(w, NSPopUpButton.class, nil);
++        CHECK(pick.numberOfItems == 2 && [pick.titleOfSelectedItem hasPrefix:@"Pro Controller"]);
++        snap(w, dir, @"settings-controller.png");
++        [pick selectItemAtIndex:1]; [NSApp sendAction:pick.action to:pick.target from:pick];
++        CHECK(p1owner == &A1 && !strcmp(S.p1, "Xbox Wireless Controller"));
++        [button_tag(w, @"padClicked:", 0) performClick:nil]; CHECK(capkind == FRONT_CAP_PAD);
++        captured(CM_IN_SOUTH, &A1);
++        CHECK(S.pad_custom && S.pad.in[0] == CM_IN_SOUTH && S.pad.in[1] == CM_IN_EAST);
++        [button_tag(w, @"padClicked:", 2) performClick:nil]; captured(CM_IN_GUIDE, &A1); CHECK(S.pad.in[2] == CM_IN_NORTH && [status(w) containsString:@"Home"]);
++        [button_tag(w, @"padClicked:", 9) performClick:nil]; captured(CM_IN_RPADDLE1, &A1); CHECK(S.pad.in[9] == CM_IN_RPADDLE1);
++        snap(w, dir, @"settings-controller-changed.png");
++        [button_tag(w, @"p1Press:", -2) performClick:nil]; CHECK(capkind == FRONT_CAP_P1); captured(0, &A2);
++        CHECK(p1owner == &A2 && !strcmp(S.p1, "Pro Controller"));
++        [button_title(w, @"Forget") performClick:nil]; CHECK(!S.p1[0]);
++        [button_title(w, @"Reset to defaults") performClick:nil]; CHECK(!S.pad_custom && S.pad.in[0] == CM_IN_EAST && S.pad.in[9] == CM_IN_RT);
++        // Graphics: each choice goes to the engine at once
++        choose(segments(w, @"pageChosen:"), 2); spin();
++        CHECK(button_title(w, @"Reset to defaults").hidden);
++        snap(w, dir, @"settings-graphics.png");
++        choose(segments(w, @"opmodeChosen:"), 1); CHECK(opm == 0);
++        choose(segments(w, @"upscaleChosen:"), 1); CHECK(fx == 1);
++        choose(segments(w, @"displayChosen:"), 1); CHECK(fs == 1);
++        choose(segments(w, @"opmodeChosen:"), 0); CHECK(opm == 1);
++        CFStringRef id = CFBundleGetIdentifier(CFBundleGetMainBundle());
++        printf("main bundle: %s\n", id ? [(__bridge NSString *)id UTF8String] : "(none: the choices were for this run only)");
++        controls_window_toggle(); spin(); CHECK(!w.visible);
++    }
++    printf(fails ? "t_controls_mac: %d failed\n" : "t_controls_mac: ok\n", fails);
++    return fails != 0;
++}
+diff --git a/dm/host/tests/t_controls_map.c b/dm/host/tests/t_controls_map.c
+new file mode 100644
+index 0000000..aef6617
+--- /dev/null
++++ b/dm/host/tests/t_controls_map.c
+@@ -0,0 +1,102 @@
++// controls_map.h (controls.json, the keyboard's and the controllers' map) and pad_slots.h's pad_slot_first, without a window or controllers
++#include "../controls_map.h"
++#include "../pad_slots.h"
++#include <assert.h>
++
++static int fails;
++#define CHECK(c) do { if (!(c)) { printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); fails++; } } while (0)
++
++int main(void) {
++    // The Mac's old fixed table (front_mac.m key_bit before controls.json) is the default map through the key-code table
++    cm_keymap d; cm_keymap_default(&d);
++    static const struct { unsigned kvk; int act; } old[] = {{38, 0}, {40, 1}, {32, 2}, {34, 3}, {3, 4}, {5, 5}, {12, 6}, {14, 7}, {6, 8}, {8, 9}, {36, 10}, {48, 11},
++        {123, 12}, {126, 13}, {124, 14}, {125, 15}, {13, CM_ACT_STICK_UP}, {0, CM_ACT_STICK_LEFT}, {1, CM_ACT_STICK_DOWN}, {2, CM_ACT_STICK_RIGHT}, {49, CM_ACT_SHAKE}};
++    for (size_t i = 0; i < sizeof old / sizeof *old; i++) CHECK(cm_keymap_action(&d, cm_usage_of_kvk(old[i].kvk)) == old[i].act);
++    CHECK(cm_usage_of_kvk(53) == CM_KEY_ESCAPE && cm_key_reserved(cm_usage_of_kvk(53)));
++    CHECK(cm_usage_of_kvk(0x7A) == CM_KEY_F1 && cm_key_reserved(CM_KEY_F1));
++    CHECK(cm_usage_of_kvk(63) == 0 && cm_usage_of_kvk(500) == 0);   // fn has no usage
++    for (int a = 0; a < 128; a++) for (int b = a + 1; b < 128; b++) CHECK(!cm_kvk_usage[a] || cm_kvk_usage[a] != cm_kvk_usage[b]);   // one key code per usage
++
++    // The keyboard's state
++    cm_kbd k = {0};
++    CHECK(cm_kbd_key(&k, &d, CM_KEY_J, 1) && k.btn == DM_BTN_A);
++    CHECK(!cm_kbd_key(&k, &d, CM_KEY_J, 1));
++    CHECK(cm_kbd_key(&k, &d, CM_KEY_W, 1) && k.w == 1);
++    CHECK(cm_kbd_key(&k, &d, CM_KEY_SPACE, 1) && (k.btn & DM_BTN_SHAKE));
++    CHECK(cm_kbd_key(&k, &d, CM_KEY_J, 0) && k.btn == DM_BTN_SHAKE);
++    CHECK(!cm_kbd_key(&k, &d, 5, 1));   // B: no action
++
++    // A file's keys: one set, refusals (Esc, F1, Command, a key asked twice), the action whose default was taken has none
++    cm_keymap m; int bad = -1;
++    CHECK(cm_keymap_parse(&m, "{\"version\": 1, \"A\": 4, \"B\": 41, \"X\": 58, \"Y\": 4, \"L\": 227, \"pad\": {\"A\": \"south\"}}", &bad) == 1);
++    CHECK(bad == 4 && m.key[0] == 4 && m.key[1] == CM_KEY_K && m.key[2] == CM_KEY_U && m.key[3] == CM_KEY_I && m.key[CM_ACT_STICK_LEFT] == 0);
++    CHECK(cm_keymap_bind(&m, 1, CM_KEY_J) && m.key[1] == CM_KEY_J && m.key[0] == 4);   // J was nobody's: B takes it, A keeps its key
++    CHECK(cm_keymap_bind(&m, 0, CM_KEY_J) && m.key[0] == CM_KEY_J && m.key[1] == 4);   // A takes B's: the two swap
++    CHECK(!cm_keymap_bind(&m, 0, CM_KEY_ESCAPE) && m.key[0] == CM_KEY_J);
++
++    // Names
++    char nm[40];
++    cm_key_name(4, nm, sizeof nm); CHECK(!strcmp(nm, "A"));
++    cm_key_name(39, nm, sizeof nm); CHECK(!strcmp(nm, "0"));
++    cm_key_name(58, nm, sizeof nm); CHECK(!strcmp(nm, "F1"));
++    cm_key_name(104, nm, sizeof nm); CHECK(!strcmp(nm, "F13"));
++    cm_key_name(225, nm, sizeof nm); CHECK(!strcmp(nm, "Left Shift"));
++    cm_key_name(0, nm, sizeof nm); CHECK(!strcmp(nm, "(none)"));
++    cm_in_text(CM_IN_SOUTH, CM_PAD_NINTENDO, nm, sizeof nm); CHECK(!strcmp(nm, "Bottom (B)"));
++    cm_in_text(CM_IN_EAST, CM_PAD_PLAYSTATION, nm, sizeof nm); CHECK(!strcmp(nm, "Right (Circle)"));
++    cm_in_text(CM_IN_NORTH, CM_PAD_UNKNOWN, nm, sizeof nm); CHECK(!strcmp(nm, "Top face button"));
++    cm_in_text(CM_IN_RT, CM_PAD_XBOX, nm, sizeof nm); CHECK(!strcmp(nm, "RT / R2"));
++
++    // The controller map: the default plays the old layout; a file's map with refusals and "none"; the swap
++    cm_padmap p; cm_padmap_default(&p);
++    for (int a = 0; a < CM_PACTS; a++) CHECK(cm_padmap_buttons(&p, cm_default_held(1ull << a)) == 1ull << a);
++    CHECK(cm_padmap_buttons(&p, 1u << CM_IN_EAST | 1u << CM_IN_LT) == (DM_BTN_A | DM_BTN_ZL));
++    CHECK(cm_padmap_parse(&p, "{\"A\": 13}", &bad) == -1 && bad == 0);   // no "pad" object: the front end keeps its layout
++    CHECK(cm_padmap_parse(&p, "{\"pad\": {\"A\": \"south\", \"B\": \"guide\", \"X\": \"nonsense\", \"Plus\": \"none\", \"Y\": \"south\"}}", &bad) == 2);
++    CHECK(bad == 3 && p.in[0] == CM_IN_SOUTH && p.in[1] == -1 && p.in[2] == CM_IN_NORTH && p.in[3] == CM_IN_WEST && p.in[10] == -1);
++    CHECK(cm_padmap_buttons(&p, 1u << CM_IN_SOUTH) == DM_BTN_A);
++    cm_padmap_default(&p);
++    CHECK(cm_padmap_bind(&p, 0, CM_IN_SOUTH) && p.in[0] == CM_IN_SOUTH && p.in[1] == CM_IN_EAST);   // A takes B's input, B takes A's old one
++    CHECK(!cm_padmap_bind(&p, 0, CM_IN_GUIDE) && p.in[0] == CM_IN_SOUTH);
++    CHECK(cm_padmap_bind(&p, 2, CM_IN_RPADDLE1) && p.in[2] == CM_IN_RPADDLE1);
++
++    // The whole file: written and read back the same; the Windows build's player 1 kept; a name cleaned
++    cm_controls c, r; cm_keymap_default(&c.keys); c.keys.key[0] = 4; c.keys.key[CM_ACT_STICK_LEFT] = 0; c.pad = p; c.pad_custom = 1;
++    snprintf(c.p1, sizeof c.p1, "Pro \"Controller\"");
++    const char *win = "{\"version\": 1, \"player1\":  \"03000000de280000ff11000001000000\", \"player1_name\":  \"Steam Virtual Gamepad\"}";
++    char out[4096]; int n = cm_controls_json(&c, win, out, sizeof out);
++    CHECK(n > 0 && (size_t)n == strlen(out));
++    cm_controls_parse(&r, out, &bad);
++    CHECK(bad == 0 && !memcmp(&r.keys, &c.keys, sizeof r.keys) && !memcmp(&r.pad, &c.pad, sizeof r.pad) && r.pad_custom && !strcmp(r.p1, "Pro _Controller_"));
++    char v[64]; CHECK(cm_json_str(out, "player1", v, sizeof v) && !strcmp(v, "03000000de280000ff11000001000000"));
++    CHECK(cm_json_str(out, "player1_name", v, sizeof v) && !strcmp(v, "Steam Virtual Gamepad"));
++    c.pad_custom = 0; c.p1[0] = 0; n = cm_controls_json(&c, NULL, out, sizeof out);
++    cm_controls_parse(&r, out, &bad);
++    CHECK(n > 0 && !r.pad_custom && !r.p1[0] && !strstr(out, "\"pad\"") && !strstr(out, "\"player1\""));
++    CHECK(cm_controls_json(&c, NULL, out, 64) == -1);   // too small
++    cm_controls_parse(&r, NULL, &bad); CHECK(bad == 0 && !r.pad_custom && !memcmp(&r.keys, &d, sizeof d));   // no file: the default
++
++    // A file the Windows game writes reads the same here
++    const char *wfile = "{\n    \"version\":  1,\n    \"A\":  13,\n    \"B\":  14,\n    \"X\":  24,\n    \"Y\":  12,\n    \"LS\":  9,\n    \"RS\":  10,\n    \"L\":  20,\n"
++        "    \"R\":  8,\n    \"ZL\":  29,\n    \"ZR\":  6,\n    \"Plus\":  40,\n    \"Minus\":  43,\n    \"Left\":  80,\n    \"Up\":  82,\n    \"Right\":  79,\n    \"Down\":  81,\n"
++        "    \"StickUp\":  26,\n    \"StickLeft\":  4,\n    \"StickDown\":  22,\n    \"StickRight\":  7,\n    \"Shake\":  44,\n"
++        "    \"pad\":  {\"A\": \"south\", \"B\": \"east\", \"X\": \"north\", \"Y\": \"west\", \"LS\": \"leftstick\", \"RS\": \"rightstick\", \"L\": \"leftshoulder\", \"R\": \"rightshoulder\", "
++        "\"ZL\": \"lefttrigger\", \"ZR\": \"righttrigger\", \"Plus\": \"start\", \"Minus\": \"back\", \"Left\": \"dpleft\", \"Up\": \"dpup\", \"Right\": \"dpright\", \"Down\": \"dpdown\"},\n"
++        "    \"player1\":  \"\",\n    \"player1_name\":  \"\"\n}\n";
++    cm_controls_parse(&r, wfile, &bad);
++    CHECK(bad == 0 && !memcmp(&r.keys, &d, sizeof d) && r.pad_custom && r.pad.in[0] == CM_IN_SOUTH && r.pad.in[1] == CM_IN_EAST && !r.p1[0]);
++
++    // Player 1 chosen: the two swap, names and all; a keyboard that keeps player 1; a controller without a slot
++    static int c1, c2, c3, kb;   // owners: only their addresses count
++    pad_slots s = {0};
++    CHECK(pad_slot_take(&s, &c1, "Xbox") == 0 && pad_slot_take(&s, &c2, "Pro") == 1);
++    CHECK(pad_slot_first(&s, &c2, NULL) == 0 && pad_slot_of(&s, &c2) == 0 && pad_slot_of(&s, &c1) == 1 && !strcmp(s.last[0], "Pro") && !strcmp(s.last[1], "Xbox"));
++    CHECK(pad_slot_first(&s, &c2, NULL) == 0 && pad_slot_first(&s, &c3, NULL) == -1);
++    pad_slot_free(&s, &c2);
++    CHECK(pad_slot_first(&s, &c1, NULL) == 0 && pad_slot_of(&s, &c1) == 0 && s.owner[1] == NULL && pad_slot_mask(&s) == 1u);   // nobody held player 1: the old slot frees
++    pad_slots t = {0};
++    CHECK(pad_slot_take(&t, &kb, "keyboard") == 0 && pad_slot_take(&t, &c1, "Xbox") == 1 && pad_slot_first(&t, &c1, &kb) == -1 && pad_slot_of(&t, &c1) == 1);
++
++    printf(fails ? "t_controls_map: %d failed\n" : "t_controls_map: ok\n", fails);
++    return fails != 0;
++}
 diff --git a/dm/ios/Sources/DmGamepad.m b/dm/ios/Sources/DmGamepad.m
-index a079d7f..f5d013a 100644
+index a079d7f..2264ab6 100644
 --- a/dm/ios/Sources/DmGamepad.m
 +++ b/dm/ios/Sources/DmGamepad.m
-@@ -30,7 +30,7 @@
+@@ -13,6 +13,8 @@
+ //   The virtual gamepad (layout button included) hides while a physical controller is connected and comes back when it is removed; meanwhile every touch goes to the game. Physical controllers keep every button (D-pad and right stick included) and map by position: bottom = B, right = A, left = Y, top = X (same positions as on a Switch controller); a Nintendo pad maps by its labels (pad_apple.h).
+ //   Each physical controller is a player of its own (local co-op), as on the Mac: the first one connected is player 1, together with the touch gamepad, the next player 2, and so on up to 8; see "Physical controllers" below.
+ //   Shaking the phone shakes the controller (DM_BTN_SHAKE: its six-axis sensor, hle_hid.c), whichever controls are in use; see "Shaking the phone" below.
++//   Physical controllers go through controls.json's map (Documents/controls.json, controls_map.h; without one the layout above), and the controller remembered there
++//   takes player 1 when it connects. The Settings sheet (DmSettingsSheet.m) changes both: a controller's Home button opens it, and so does holding the layout button.
+ #import <UIKit/UIKit.h>
+ #import <GameController/GameController.h>
+ #import <CoreMotion/CoreMotion.h>
+@@ -27,10 +29,14 @@
+ #include "motion_fusion.h"
+ #include "pad_apple.h"
+ #include "pad_slots.h"
++#include "controls_state.h"
  #include <stdatomic.h>
  
++void dm_settings_show(void);            // DmSettingsSheet.m
++void dm_settings_pads_changed(void);
++
  enum { B_A = 0, B_B, B_X, B_Y, B_LS, B_RS, B_L, B_R, B_ZL, B_ZR, B_PLUS, B_MINUS, B_LEFT, B_UP, B_RIGHT, B_DOWN, B_N };
 -enum { C_NONE = 0, C_STICK, C_DPAD, C_FACE, C_BTN, C_SWAP, C_GAME };   // which control a touch holds; C_GAME: none, the touch goes to the game's touch screen (finger slot << 8)
 +enum { C_NONE = 0, C_STICK, C_DPAD, C_FACE, C_BTN, C_SWAP, C_GAME, C_LOOK };   // C_LOOK: a look drag (pointer look, hle_hid.c dm_look_add)   // which control a touch holds; C_GAME: none, the touch goes to the game's touch screen (finger slot << 8)
  
  static pthread_mutex_t g_mu = PTHREAD_MUTEX_INITIALIZER;
  static uint64_t g_touch_btn, g_shake_btn;
-@@ -138,6 +138,8 @@ @implementation DmGamepad {
+@@ -138,11 +144,14 @@ static void pads_start(void);   // Physical controllers, below
      NSMapTable<UITouch *, NSNumber *> *_owner;     // touch → control (with the key for C_BTN or the stick for C_STICK, << 8)
      UITouch *_stick[2]; CGPoint _stickNow[2];      // the touch holding each stick and where it is now (0 left, 1 right)
      CGPoint _rCentre;                              // the right stick's centre: where its touch landed, dragged along past K_RSTICK_R
@@ -8348,7 +9715,13 @@ index a079d7f..f5d013a 100644
      uint64_t _faceBits, _dpadBits, _btnBits;
      NSMapTable<UITouch *, NSNumber *> *_faceOf;    // which keys each touch on the diamond currently holds
      CAShapeLayer *_key[B_N]; CATextLayer *_label[B_N];   // one layer per key
-@@ -170,6 +172,8 @@ - (instancetype)initWithFrame:(CGRect)f {
+     CAShapeLayer *_ring, *_knob;                   // the left stick (the right one is not drawn)
+     CAShapeLayer *_swap; CATextLayer *_swapLabel; BOOL _swapHeld;
++    NSTimer *_swapTimer; BOOL _swapLong;            // the layout button held 0.6 s opens the Settings sheet instead of switching layouts
+     UIImpactFeedbackGenerator *_touchFeedback;       // one short feedback per touch-control press edge
+     unsigned _hapticSticks;
+     BOOL _stickShown;                              // the left stick was held at the last refresh
+@@ -170,6 +179,8 @@ static BOOL fullOnly(int b) { return b == B_LS || b == B_RS || b >= B_LEFT; }
      if ((self = [super initWithFrame:f])) {
          self.multipleTouchEnabled = YES; self.opaque = NO; self.backgroundColor = UIColor.clearColor;
          const char *feedback = getenv("DM_TOUCH_HAPTICS");
@@ -8357,7 +9730,7 @@ index a079d7f..f5d013a 100644
          if (!feedback || atoi(feedback)) {
              _touchFeedback = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight];
              [_touchFeedback prepare];
-@@ -298,6 +302,7 @@ - (void)recompute {
+@@ -298,6 +309,7 @@ static CGFloat dist(CGPoint a, CGPoint b) { return hypot(a.x - b.x, a.y - b.y);
          CGFloat m = fmin((d - dz) / (R * K_FULL - dz), 1) / d;   // outside the dead zone: 0 rising to full at the full-tilt radius
          ax[i * 2] = (int32_t)lrint(o.x * m * 32767); ax[i * 2 + 1] = (int32_t)lrint(-o.y * m * 32767);   // host: up is positive; rounded so full tilt is exactly 32767
      }
@@ -8365,7 +9738,15 @@ index a079d7f..f5d013a 100644
      BOOL changed = face != _faceBits || dpad != _dpadBits || btn != _btnBits || swap != _swapHeld;
      uint64_t pressed = (face | dpad | btn) & ~(_faceBits | _dpadBits | _btnBits);
      unsigned gripping = (_stick[0] ? 1u : 0) | (_stick[1] ? 2u : 0);
-@@ -345,6 +350,9 @@ - (void)touchesBegan:(NSSet<UITouch *> *)ts withEvent:(UIEvent *)e {
+@@ -338,13 +350,16 @@ static CGFloat dist(CGPoint a, CGPoint b) { return hypot(a.x - b.x, a.y - b.y);
+         if (_padOff) { game |= [self gameBegin:t]; continue; }
+         CGPoint p = [t locationInView:self]; int hit = _tap ? -1 : [self btnAt:p];
+         if (hit >= 0) { [_owner setObject:@(C_BTN | (uint64_t)hit << 8) forKey:t]; continue; }
+-        if ([self inSwap:p]) { [_owner setObject:@(C_SWAP) forKey:t]; continue; }
++        if ([self inSwap:p]) { [_owner setObject:@(C_SWAP) forKey:t]; [self swapHoldStart]; continue; }
+         if (_tap) { game |= [self gameBegin:t]; continue; }
+         // diamond, D-pad, left stick: take the one with the smallest distance / grab radius, if it is <= 1
+         CGFloat best = 1; int kind = C_NONE, idx = 0;
          CGFloat f = dist(p, self.faceCenter) / (self.faceGap + self.faceR * 1.6); if (f <= best) { best = f; kind = C_FACE; }
          if (_full) { CGFloat d = dist(p, self.dpadCenter) / (self.dpadR * K_DPAD_GRAB); if (d < best) { best = d; kind = C_DPAD; } }
          if (!_stick[0]) { CGFloat s = dist(p, self.stickHome) / ([self stickR:0] * K_STICK_GRAB); if (s < best) { best = s; kind = C_STICK; } }
@@ -8375,7 +9756,7 @@ index a079d7f..f5d013a 100644
          if (kind == C_NONE && _full && !_stick[1] && [self inRightArea:p]) { kind = C_STICK; idx = 1; _rCentre = p; }   // the right stick: centred where the touch lands
          if (kind == C_FACE) { [_owner setObject:@(C_FACE) forKey:t]; [_faceOf setObject:@([self faceAt:p]) forKey:t]; }
          else if (kind == C_DPAD) [_owner setObject:@(C_DPAD) forKey:t];
-@@ -363,6 +371,10 @@ - (void)touchesMoved:(NSSet<UITouch *> *)ts withEvent:(UIEvent *)e {
+@@ -363,25 +378,36 @@ static CGFloat dist(CGPoint a, CGPoint b) { return hypot(a.x - b.x, a.y - b.y);
              if ((v >> 8) == 1) { CGFloat d = dist(p, _rCentre), R = [self stickR:1];   // the right stick's centre follows a finger past its radius, so turning back responds at once
                  if (d > R) _rCentre = CGPointMake(p.x - (p.x - _rCentre.x) * R / d, p.y - (p.y - _rCentre.y) * R / d); } }
          else if (c == C_GAME) game = YES;
@@ -8386,7 +9767,15 @@ index a079d7f..f5d013a 100644
      }
      if (game) [self pushGame];
      [self recompute];
-@@ -373,6 +385,7 @@ - (void)endTouches:(NSSet<UITouch *> *)ts tapped:(BOOL)ended {
+ }
++- (void)swapHoldStart {
++    [_swapTimer invalidate]; _swapLong = NO;
++    __weak DmGamepad *w = self;
++    _swapTimer = [NSTimer scheduledTimerWithTimeInterval:0.6 repeats:NO block:^(NSTimer *tm) { (void)tm; DmGamepad *s = w; if (!s || !s->_swapHeld) return; s->_swapLong = YES; dm_settings_show(); }];
++}
+ - (void)endTouches:(NSSet<UITouch *> *)ts tapped:(BOOL)ended {
+     BOOL swap = NO, game = NO;
+     for (UITouch *t in ts) {
          uint64_t v = [_owner objectForKey:t].unsignedLongLongValue;
          if (ended && (v & 0xff) == C_SWAP && [self inSwap:[t locationInView:self]]) swap = YES;   // layout button: counts only when released on the button
          if ((v & 0xff) == C_GAME && (v >> 8) < 16) { _game[v >> 8] = nil; game = YES; }
@@ -8394,7 +9783,10 @@ index a079d7f..f5d013a 100644
          [_owner removeObjectForKey:t]; [_faceOf removeObjectForKey:t]; for (int i = 0; i < 2; i++) if (t == _stick[i]) _stick[i] = nil;
      }
      if (game) [self pushGame];
-@@ -381,7 +394,7 @@ - (void)endTouches:(NSSet<UITouch *> *)ts tapped:(BOOL)ended {
+     [self recompute];
+-    if (swap) [self nextLayout];
++    if (swap && !_swapLong) [self nextLayout];
++    if (!_swapHeld) { [_swapTimer invalidate]; _swapTimer = nil; _swapLong = NO; }
  }
  - (void)touchesEnded:(NSSet<UITouch *> *)ts withEvent:(UIEvent *)e { [self endTouches:ts tapped:YES]; }
  - (void)touchesCancelled:(NSSet<UITouch *> *)ts withEvent:(UIEvent *)e { [self endTouches:ts tapped:NO]; }
@@ -8403,6 +9795,342 @@ index a079d7f..f5d013a 100644
  
  // ---- Shapes ----
  static CGPathRef circlePath(CGPoint c, CGFloat r) { return CGPathCreateWithEllipseInRect(CGRectMake(c.x - r, c.y - r, 2 * r, 2 * r), NULL); }
+@@ -466,14 +492,9 @@ static int32_t axis(float v) { return (int32_t)(fmaxf(-1.f, fminf(1.f, v)) * 327
+ static void read_pad(GCExtendedGamepad *g) {
+     int p = g_merge ? 0 : pad_slot_of(&g_slots, (__bridge const void *)g.controller); if (p < 0) return;
+     dm_haptics_apple_controller(p, g.controller);
+-    _Static_assert(DM_BTN_A == 1u << B_A && DM_BTN_B == 1u << B_B && DM_BTN_X == 1u << B_X && DM_BTN_Y == 1u << B_Y, "face button bits");
+-    uint64_t m = dm_pad_face(g);   // by position, a Nintendo pad by its labels
+-    #define K(btn, bit) if (btn.isPressed) m |= 1ull << bit
+-    K(g.leftShoulder, B_L); K(g.rightShoulder, B_R); K(g.leftTrigger, B_ZL); K(g.rightTrigger, B_ZR);
+-    K(g.buttonMenu, B_PLUS); if (g.buttonOptions) K(g.buttonOptions, B_MINUS);
+-    if (g.leftThumbstickButton) K(g.leftThumbstickButton, B_LS); if (g.rightThumbstickButton) K(g.rightThumbstickButton, B_RS);
+-    K(g.dpad.left, B_LEFT); K(g.dpad.up, B_UP); K(g.dpad.right, B_RIGHT); K(g.dpad.down, B_DOWN);
+-    #undef K
++    uint32_t in = dm_pad_inputs(g), down = 0;   // by position, a Nintendo pad by its labels
++    uint64_t m = pad_capture((__bridge const void *)g.controller, &in, &down) ? 0 : cm_padmap_buttons(&g_ctl.pad, in);   // controls_state.h: the map, the Settings sheet's capture
++    if (!g_cap && (down >> CM_IN_GUIDE & 1)) dispatch_async(dispatch_get_main_queue(), ^{ dm_settings_show(); });   // Home opens the Settings sheet
+     dm_pad_set_player(p, m, axis(g.leftThumbstick.xAxis.value), axis(g.leftThumbstick.yAxis.value), axis(g.rightThumbstick.xAxis.value), axis(g.rightThumbstick.yAxis.value));
+ }
+ // Home and Capture: without this iOS takes them as system gestures (Home opens the Games overlay, Capture a screenshot); the app gives them no function
+@@ -481,7 +502,10 @@ static void pad_keep_system_buttons(GCController *c) { for (NSString *b in @[GCI
+ static const char *pad_name(GCController *c) { return c.vendorName.UTF8String ?: "?"; }
+ static void npad_name(int p, char *out, size_t cap) { uint32_t id = dm_player_npad(p); if (id == 0x20) snprintf(out, cap, "handheld"); else snprintf(out, cap, "%u", id); }
+ static void pads_start(void) {
+-    const char *e = getenv("DM_PAD_MERGE"); g_merge = e && atoi(e);
++    const char *e = getenv("DM_KEYMAP");   // controls.json: Documents, or DM_KEYMAP=<file>
++    NSString *doc = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
++    controls_load(e && *e ? e : [doc stringByAppendingPathComponent:@"controls.json"].fileSystemRepresentation);
++    e = getenv("DM_PAD_MERGE"); g_merge = e && atoi(e);
+     LOG("front end: %s", g_merge ? "every controller is player 1 (DM_PAD_MERGE)" : "each controller is a player of its own, the touch gamepad plays with player 1");
+ }
+ // Called at start and on every connect / disconnect (gone: the controller that was just removed, nil otherwise); returns whether a controller is in use
+@@ -498,6 +522,22 @@ static BOOL pads_merged(GCController *gone) {
+     if (!any) { dm_haptics_apple_controller(0, nil); dm_pad_set(0, 0, 0, 0, 0); }
+     return any;
+ }
++// Player 1 chosen (the Settings sheet, or controls.json's "player1_mac" when that controller connects): it takes slot 0 and the old player 1 its slot, with their
++// motion sensors and rumble, as on the Mac (front_mac.m pad_make_first)
++static void pad_make_first(const void *owner) {
++    int p = g_merge ? -1 : pad_slot_of(&g_slots, owner); if (p <= 0) return;
++    if (pad_slot_first(&g_slots, owner, NULL) < 0) return;
++    GCController *a = g_held[p], *b = g_held[0];
++    g_held[0] = a; g_held[p] = b;
++    if (a) { dm_motion_detach(a, p); dm_motion_attach(a, 0); }
++    if (b) { dm_motion_detach(b, 0); dm_motion_attach(b, p); }
++    dm_haptics_apple_controller(0, a); dm_haptics_apple_controller(p, b);
++    dm_pad_set_player(0, 0, 0, 0, 0, 0); dm_pad_set_player(p, 0, 0, 0, 0, 0);
++    dm_pad_players(pad_slot_mask(&g_slots));
++    if (a.extendedGamepad) read_pad(a.extendedGamepad);
++    if (b.extendedGamepad) read_pad(b.extendedGamepad);
++    LOG("front end: controller '%s' is player 1 now%s%s%s", g_slots.last[0], b ? ", '" : "", b ? g_slots.last[p] : "", b ? "' took its old place" : "");
++}
+ static BOOL pads_slotted(GCController *gone) {
+     NSArray<GCController *> *now = GCController.controllers; char nb[16];
+     for (int p = 0; p < DM_PLAYERS; p++) if (g_held[p] && (g_held[p] == gone || ![now containsObject:g_held[p]])) {
+@@ -516,6 +556,7 @@ static BOOL pads_slotted(GCController *gone) {
+         dm_motion_attach(c, p);
+         npad_name(p, nb, sizeof nb); LOG("controller '%s' connected: player %d (npad %s)%s", pad_name(c), p + 1, nb, c.motion.hasRotationRate ? ", with motion (gyro)" : "");
+         read_pad(c.extendedGamepad);
++        if (p > 0 && p1_match(pad_name(c))) pad_make_first((__bridge const void *)c);
+     }
+     dm_pad_players(pad_slot_mask(&g_slots));
+     return pad_slot_mask(&g_slots) != 0;
+@@ -524,10 +565,41 @@ static BOOL pads_slotted(GCController *gone) {
+     GCController *c = note.object, *gone = [note.name isEqual:GCControllerDidDisconnectNotification] ? c : nil;
+     if (c && (!c.extendedGamepad || g_merge)) LOG("controller %s: %s%s", gone ? "disconnected" : "connected", pad_name(c), c.extendedGamepad ? "" : " (no extended gamepad profile: not used)");
+     BOOL any = g_merge ? pads_merged(gone) : pads_slotted(gone);
+-    dispatch_async(dispatch_get_main_queue(), ^{ self->_padOff = any; self->_controls.hidden = any; [self reset]; });   // the touch gamepad hides while any controller is in use
++    dispatch_async(dispatch_get_main_queue(), ^{ self->_padOff = any; self->_controls.hidden = any; [self reset]; dm_settings_pads_changed(); });   // the touch gamepad hides while any controller is in use
+ }
+ @end
+ 
++// ---- The Settings sheet's side (controls_front.h; controls_state.h holds the map and the capture) ----
++static void pads_release(void) {   // a new map, a capture: nothing a controller holds stays pressed under its old meaning
++    if (g_merge) { dm_pad_set(0, 0, 0, 0, 0); return; }
++    for (int p = 0; p < DM_PLAYERS; p++) if (g_held[p]) dm_pad_set_player(p, 0, 0, 0, 0, 0);
++}
++static void pads_reread(void) {
++    if (g_merge) { for (GCController *c in GCController.controllers) if (c.extendedGamepad) read_pad(c.extendedGamepad); }
++    else for (int p = 0; p < DM_PLAYERS; p++) if (g_held[p].extendedGamepad) read_pad(g_held[p].extendedGamepad);
++}
++void front_controls_set(const cm_controls *c) { g_ctl = *c; pads_release(); pads_reread(); controls_save(); }
++void front_player1(const void *owner) {
++    if (!owner) { g_ctl.p1[0] = 0; LOG("front end: no controller remembered as player 1"); controls_save(); return; }
++    if (g_merge) { LOG("front end: every controller is player 1 (DM_PAD_MERGE)"); return; }
++    pad_make_first(owner);
++    if (pad_slot_of(&g_slots, owner) != 0) return;
++    cm_name_clean(g_slots.last[0], g_ctl.p1, sizeof g_ctl.p1); controls_save();
++    dm_settings_pads_changed();
++}
++int front_pads(front_pad_entry *out, int max) {
++    int n = 0;
++    if (g_merge) {
++        for (GCController *c in GCController.controllers) if (c.extendedGamepad && n < max) { out[n] = (front_pad_entry){(__bridge const void *)c, 0, dm_pad_type(c), ""}; snprintf(out[n].name, sizeof out[n].name, "%s", pad_name(c)); n++; }
++        return n;
++    }
++    for (int p = 0; p < DM_PLAYERS && n < max; p++) if (g_held[p]) {
++        out[n] = (front_pad_entry){(__bridge const void *)g_held[p], p, dm_pad_type(g_held[p]), ""}; snprintf(out[n].name, sizeof out[n].name, "%s", g_slots.last[p]); n++;
++    }
++    return n;
++}
++void front_capture(int kind, void (^done)(int value, const void *owner)) { pads_release(); capture_start(kind, done); }
++
+ UIView *dm_gamepad_view(CGRect frame) { DmGamepad *v = [[DmGamepad alloc] initWithFrame:frame]; g_view = v; return v; }
+ void dm_gamepad_active(void) { dispatch_async(dispatch_get_main_queue(), ^{ for (GCController *c in GCController.controllers) dm_motion_rearm(c); }); }   // On become active: motion_apple.h
+ void dm_gamepad_reset(void) {   // On resign active: release everything (a key held while switching away and released in background gets no "release")
+diff --git a/dm/ios/Sources/DmSettingsSheet.m b/dm/ios/Sources/DmSettingsSheet.m
+new file mode 100644
+index 0000000..76515a5
+--- /dev/null
++++ b/dm/ios/Sources/DmSettingsSheet.m
+@@ -0,0 +1,226 @@
++// The in-game Settings sheet (iPhone, iPad), over the running game: a controller's Home button opens it, and so does holding the touch gamepad's layout button
++// (DmGamepad.m). Two pages:
++//   - Controller: player 1 (a connected controller chosen from the list, or the one a button is pressed on; remembered in Documents/controls.json), then the
++//     controller input of each Switch button, one map for every controller: tap a button, then press the controller button for it or pull the trigger.
++//     A button another one had swaps with it; Reset to defaults goes back to the controllers' own layout. The touch gamepad keeps its layout.
++//   - Graphics: what changes while the game runs: console mode, upscaling (MetalFX), the frame-rate counter. Each is also kept as the launcher's saved choice
++//     (launcher.<VAR>, LauncherSettings.swift) for the next start; a setting an env file or the launch environment fixed is shown, not changeable.
++// DmGamepad.m holds the map, the players and the capture (controls_front.h, controls_state.h)
++#import <UIKit/UIKit.h>
++#include "dm.h"
++#include "controls_front.h"
++
++int dm_opmode(void);
++void dm_set_opmode(int m);
++int front_ios_tv(void);
++int front_ios_fps(void);
++void front_ios_fps_set(int on);
++
++enum { PAGE_PAD, PAGE_GFX };
++enum { ACT_P1 = -2 };
++
++static int p1_type(void) {
++    front_pad_entry p[8]; int n = front_pads(p, 8);
++    for (int i = 0; i < n; i++) if (p[i].player == 0) return p[i].type;
++    return CM_PAD_UNKNOWN;
++}
++static NSString *in_label(int in) { char w[48]; cm_in_text(in, p1_type(), w, sizeof w); return @(w); }
++static int env_fixed(const char *var) {   // main.m's DM_ENV_FILE_KEYS / DM_ENV_LAUNCH_KEYS, as the launcher shows them
++    for (int i = 0; i < 2; i++) {
++        const char *l = getenv(i ? "DM_ENV_LAUNCH_KEYS" : "DM_ENV_FILE_KEYS"); size_t n = strlen(var);
++        for (const char *p = l ? strstr(l, var) : NULL; p; p = strstr(p + 1, var))
++            if ((p == l || p[-1] == ' ') && (p[n] == ' ' || !p[n])) return 1;
++    }
++    return 0;
++}
++static void save_choice(NSString *var, NSString *value) {
++    [NSUserDefaults.standardUserDefaults setObject:value forKey:[@"launcher." stringByAppendingString:var]];
++    LOG("settings: %s=%s now, and kept for the next start", var.UTF8String, value.UTF8String);
++}
++
++@interface DmSettingsVC : UIViewController
++- (void)refresh;
++@end
++static __weak DmSettingsVC *g_sheet;
++
++@implementation DmSettingsVC {
++    UISegmentedControl *_pages;
++    UIStackView *_rows;
++    UILabel *_hint, *_status;
++    UIButton *_reset;
++    int _page, _capAct;
++}
++- (void)viewDidLoad {
++    [super viewDidLoad];
++    _capAct = -1;
++    self.view.backgroundColor = UIColor.systemBackgroundColor;
++    UILabel *title = [UILabel new]; title.text = @"Settings"; title.font = [UIFont boldSystemFontOfSize:20];
++    UIButton *done = [UIButton buttonWithType:UIButtonTypeSystem]; [done setTitle:@"Done" forState:UIControlStateNormal];
++    done.titleLabel.font = [UIFont boldSystemFontOfSize:17];
++    [done addTarget:self action:@selector(close) forControlEvents:UIControlEventTouchUpInside];
++    UIStackView *top = [[UIStackView alloc] initWithArrangedSubviews:@[title, [UIView new], done]]; top.alignment = UIStackViewAlignmentCenter;
++    _pages = [[UISegmentedControl alloc] initWithItems:@[@"Controller", @"Graphics"]]; _pages.selectedSegmentIndex = 0;
++    [_pages addTarget:self action:@selector(pageChosen:) forControlEvents:UIControlEventValueChanged];
++    _hint = [UILabel new]; _hint.numberOfLines = 0; _hint.font = [UIFont systemFontOfSize:14]; _hint.textColor = UIColor.secondaryLabelColor;
++    _rows = [UIStackView new]; _rows.axis = UILayoutConstraintAxisVertical; _rows.spacing = 8; _rows.translatesAutoresizingMaskIntoConstraints = NO;
++    UIScrollView *scroll = [UIScrollView new]; [scroll addSubview:_rows];
++    _status = [UILabel new]; _status.numberOfLines = 2; _status.font = [UIFont systemFontOfSize:14];
++    _reset = [UIButton buttonWithType:UIButtonTypeSystem]; [_reset setTitle:@"Reset to defaults" forState:UIControlStateNormal];
++    [_reset addTarget:self action:@selector(resetPage) forControlEvents:UIControlEventTouchUpInside];
++    [_reset setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
++    UIStackView *bottom = [[UIStackView alloc] initWithArrangedSubviews:@[_status, _reset]]; bottom.alignment = UIStackViewAlignmentCenter; bottom.spacing = 12;
++    UIStackView *all = [[UIStackView alloc] initWithArrangedSubviews:@[top, _pages, _hint, scroll, bottom]];
++    all.axis = UILayoutConstraintAxisVertical; all.spacing = 10; all.translatesAutoresizingMaskIntoConstraints = NO;
++    [self.view addSubview:all];
++    UILayoutGuide *g = self.view.safeAreaLayoutGuide;
++    [NSLayoutConstraint activateConstraints:@[
++        [all.topAnchor constraintEqualToAnchor:g.topAnchor constant:12], [all.bottomAnchor constraintEqualToAnchor:g.bottomAnchor constant:-12],
++        [all.leadingAnchor constraintEqualToAnchor:g.leadingAnchor constant:16], [all.trailingAnchor constraintEqualToAnchor:g.trailingAnchor constant:-16],
++        [_rows.topAnchor constraintEqualToAnchor:scroll.contentLayoutGuide.topAnchor], [_rows.bottomAnchor constraintEqualToAnchor:scroll.contentLayoutGuide.bottomAnchor],
++        [_rows.leadingAnchor constraintEqualToAnchor:scroll.contentLayoutGuide.leadingAnchor], [_rows.trailingAnchor constraintEqualToAnchor:scroll.contentLayoutGuide.trailingAnchor],
++        [_rows.widthAnchor constraintEqualToAnchor:scroll.frameLayoutGuide.widthAnchor]]];
++    [self refresh];
++}
++- (void)viewWillDisappear:(BOOL)a { [super viewWillDisappear:a]; front_capture_cancel(); }
++- (void)close { front_capture_cancel(); [self dismissViewControllerAnimated:YES completion:nil]; }
++- (void)pageChosen:(UISegmentedControl *)s { front_capture_cancel(); _page = (int)s.selectedSegmentIndex; _status.text = @""; [self refresh]; }
++
++// ---- the rows ----
++static UIStackView *row(NSString *label, UIView *control) {
++    UILabel *l = [UILabel new]; l.text = label; l.textAlignment = NSTextAlignmentRight;
++    [l.widthAnchor constraintEqualToConstant:140].active = YES;
++    UIStackView *s = [[UIStackView alloc] initWithArrangedSubviews:@[l, control]]; s.alignment = UIStackViewAlignmentCenter; s.spacing = 12;
++    return s;
++}
++- (UIButton *)bindButton:(NSString *)title tag:(int)tag action:(SEL)sel {
++    UIButton *b = [UIButton buttonWithConfiguration:UIButtonConfiguration.grayButtonConfiguration primaryAction:nil];
++    [b setTitle:title forState:UIControlStateNormal]; b.tag = tag;
++    [b addTarget:self action:sel forControlEvents:UIControlEventTouchUpInside];
++    [b.widthAnchor constraintGreaterThanOrEqualToConstant:220].active = YES;
++    return b;
++}
++- (void)refresh {
++    if (!self.isViewLoaded) return;
++    for (UIView *v in [_rows.arrangedSubviews copy]) { [_rows removeArrangedSubview:v]; [v removeFromSuperview]; }
++    _pages.selectedSegmentIndex = _page;
++    _reset.hidden = _page == PAGE_GFX;
++    const cm_controls *c = front_controls();
++    if (_page == PAGE_PAD) {
++        _hint.text = @"One map for every controller. Tap a button, then press the controller button for it or pull the trigger.";
++        front_pad_entry p[8]; int n = front_pads(p, 8);
++        UIButton *pick = [UIButton buttonWithConfiguration:UIButtonConfiguration.grayButtonConfiguration primaryAction:nil];
++        NSMutableArray<UIAction *> *items = [NSMutableArray new]; NSString *now = @"No controller connected";
++        for (int i = 0; i < n; i++) {
++            NSString *t = [NSString stringWithFormat:@"%@ (player %d)", @(p[i].name), p[i].player + 1]; const void *owner = p[i].owner;
++            __weak DmSettingsVC *w = self;
++            UIAction *a = [UIAction actionWithTitle:t image:nil identifier:nil handler:^(UIAction *x) { (void)x; [w choosePlayer1:owner]; }];
++            if (p[i].player == 0) { a.state = UIMenuElementStateOn; now = t; }
++            [items addObject:a];
++        }
++        [pick setTitle:now forState:UIControlStateNormal];
++        if (n) { pick.menu = [UIMenu menuWithChildren:items]; pick.showsMenuAsPrimaryAction = YES; } else pick.enabled = NO;
++        [pick.widthAnchor constraintGreaterThanOrEqualToConstant:220].active = YES;
++        [_rows addArrangedSubview:row(@"Player 1", pick)];
++        UIButton *press = [self bindButton:_capAct == ACT_P1 ? @"Press a button on it…" : @"Choose by pressing a button" tag:ACT_P1 action:@selector(p1Press:)];
++        press.enabled = n > 0;
++        [_rows addArrangedSubview:row(@"", press)];
++        UIButton *forget = [UIButton buttonWithType:UIButtonTypeSystem]; [forget setTitle:@"Forget" forState:UIControlStateNormal]; forget.enabled = c->p1[0] != 0;
++        [forget addTarget:self action:@selector(p1Forget) forControlEvents:UIControlEventTouchUpInside];
++        UILabel *rem = [UILabel new]; rem.text = c->p1[0] ? @(c->p1) : @"none";
++        UIStackView *rs = [[UIStackView alloc] initWithArrangedSubviews:@[rem, forget]]; rs.spacing = 8;
++        [_rows addArrangedSubview:row(@"Remembered", rs)];
++        for (int a = 0; a < CM_PACTS; a++)
++            [_rows addArrangedSubview:row(@(cm_act_labels[a]), [self bindButton:_capAct == a ? @"Press a controller button…" : in_label(c->pad.in[a]) tag:a action:@selector(padTapped:)])];
++    } else {
++        _hint.text = @"These change the game now and are kept for the next start. The launcher, shown before the game starts, has the other settings.";
++        int sup = 0, fx = dm_present_upscale_get(&sup), tv = front_ios_tv();
++        UISegmentedControl *mode = [[UISegmentedControl alloc] initWithItems:@[@"Docked", @"Handheld"]]; mode.selectedSegmentIndex = dm_opmode() == 1 ? 0 : 1;
++        [mode addTarget:self action:@selector(opmodeChosen:) forControlEvents:UIControlEventValueChanged];
++        mode.enabled = !tv && !env_fixed("DM_OPMODE");
++        UISegmentedControl *up = [[UISegmentedControl alloc] initWithItems:@[@"Standard", @"MetalFX"]]; up.selectedSegmentIndex = fx ? 1 : 0;
++        [up addTarget:self action:@selector(upscaleChosen:) forControlEvents:UIControlEventValueChanged];
++        if (sup == 0) [up setEnabled:NO forSegmentAtIndex:1];
++        up.enabled = !env_fixed("DM_PRESENT_UPSCALE");
++        UISwitch *fps = [UISwitch new]; fps.on = front_ios_fps() != 0; fps.enabled = !env_fixed("DM_SHOW_FPS");
++        [fps addTarget:self action:@selector(fpsChosen:) forControlEvents:UIControlEventValueChanged];
++        [_rows addArrangedSubview:row(@"Console mode", mode)];
++        if (tv) { UILabel *l = [UILabel new]; l.text = @"Docked while the TV is connected"; l.textColor = UIColor.secondaryLabelColor; l.font = [UIFont systemFontOfSize:13]; [_rows addArrangedSubview:row(@"", l)]; }
++        [_rows addArrangedSubview:row(@"Upscaling", up)];
++        if (sup == 0) { UILabel *l = [UILabel new]; l.text = @"This device's GPU has no MetalFX scaler"; l.textColor = UIColor.secondaryLabelColor; l.font = [UIFont systemFontOfSize:13]; [_rows addArrangedSubview:row(@"", l)]; }
++        [_rows addArrangedSubview:row(@"Frame-rate counter", fps)];
++    }
++}
++
++// ---- the actions ----
++- (void)setStatus:(NSString *)s { _status.text = s; LOG("settings: %s", s.UTF8String); }
++- (void)capture:(int)kind act:(int)act {
++    _capAct = act;
++    [self refresh];
++    _status.text = kind == FRONT_CAP_PAD ? [NSString stringWithFormat:@"Press the controller button for %s, or pull a trigger", cm_act_labels[act]]
++                                         : @"Press any button on the controller that should be player 1";
++    __weak DmSettingsVC *w = self;
++    front_capture(kind, ^(int v, const void *owner) { [w captured:v owner:owner kind:kind act:act]; });
++}
++- (void)captured:(int)v owner:(const void *)owner kind:(int)kind act:(int)act {
++    _capAct = -1;
++    cm_controls c = *front_controls();
++    if (v == -1) _status.text = @"Cancelled: nothing changed";
++    else if (v == -2) _status.text = @"Nothing was pressed within 8 seconds: nothing changed";
++    else if (kind == FRONT_CAP_PAD) {
++        if (cm_in_reserved(v)) [self setStatus:@"Home opens this sheet: choose another button"];
++        else {
++            int other = -1, old = c.pad.in[act];
++            for (int a = 0; a < CM_PACTS; a++) if (a != act && c.pad.in[a] == v) other = a;
++            cm_padmap_bind(&c.pad, act, v); c.pad_custom = 1; front_controls_set(&c);
++            [self setStatus:other >= 0 ? [NSString stringWithFormat:@"%s: %@ (%s takes %@)", cm_act_labels[act], in_label(v), cm_act_labels[other], in_label(old)]
++                                       : [NSString stringWithFormat:@"%s: %@", cm_act_labels[act], in_label(v)]];
++        }
++    } else {
++        front_player1(owner);
++        [self setStatus:[NSString stringWithFormat:@"%@ is player 1 now, and stays player 1 when it connects", @(front_controls()->p1)]];
++    }
++    [self refresh];
++}
++- (void)padTapped:(UIButton *)b { [self capture:FRONT_CAP_PAD act:(int)b.tag]; }
++- (void)p1Press:(UIButton *)b { (void)b; [self capture:FRONT_CAP_P1 act:ACT_P1]; }
++- (void)choosePlayer1:(const void *)owner {
++    front_capture_cancel(); front_player1(owner);
++    [self setStatus:[NSString stringWithFormat:@"%@ is player 1 now, and stays player 1 when it connects", @(front_controls()->p1)]];
++    [self refresh];
++}
++- (void)p1Forget { front_player1(NULL); [self setStatus:@"No controller is remembered as player 1: they take players in the order they connect"]; [self refresh]; }
++- (void)resetPage {
++    front_capture_cancel();
++    cm_controls c = *front_controls(); cm_padmap_default(&c.pad); c.pad_custom = 0; front_controls_set(&c);
++    [self setStatus:@"Controller: back to the controllers' own layout"]; [self refresh];
++}
++- (void)opmodeChosen:(UISegmentedControl *)s {
++    int docked = s.selectedSegmentIndex == 0;
++    dm_set_opmode(docked); save_choice(@"DM_OPMODE", docked ? @"1" : @"0");
++    _status.text = docked ? @"Console mode: docked" : @"Console mode: handheld";
++}
++- (void)upscaleChosen:(UISegmentedControl *)s {
++    int on = s.selectedSegmentIndex == 1;
++    dm_present_upscale_set(on); save_choice(@"DM_PRESENT_UPSCALE", on ? @"metalfx" : @"off");
++    _status.text = on ? @"Upscaling: MetalFX (from the next frame)" : @"Upscaling: standard";
++}
++- (void)fpsChosen:(UISwitch *)s {
++    front_ios_fps_set(s.on); save_choice(@"DM_SHOW_FPS", s.on ? @"1" : @"0");
++    _status.text = s.on ? @"Frame-rate counter: on" : @"Frame-rate counter: off";
++}
++@end
++
++void dm_settings_show(void) {
++    if (g_sheet) return;
++    UIViewController *root = nil;
++    for (UIScene *s in UIApplication.sharedApplication.connectedScenes)
++        if ([s isKindOfClass:UIWindowScene.class]) for (UIWindow *w in ((UIWindowScene *)s).windows) if (w.isKeyWindow) root = w.rootViewController;
++    while (root.presentedViewController) root = root.presentedViewController;
++    if (!root) return;
++    DmSettingsVC *vc = [DmSettingsVC new];
++    vc.modalPresentationStyle = UIModalPresentationFormSheet;
++    g_sheet = vc;
++    [root presentViewController:vc animated:YES completion:nil];
++    LOG("settings: the Settings sheet is open");
++}
++void dm_settings_pads_changed(void) { [g_sheet refresh]; }
 diff --git a/dm/ios/Sources/LauncherRow.swift b/dm/ios/Sources/LauncherRow.swift
 index 82fa3b3..720f299 100644
 --- a/dm/ios/Sources/LauncherRow.swift
@@ -8457,6 +10185,57 @@ index d03c557..7e932c0 100644
  }
  struct SettingsFile: Decodable { let settings: [Setting] }
  
+diff --git a/dm/ios/Sources/front_ios.m b/dm/ios/Sources/front_ios.m
+index b941e77..c1784eb 100644
+--- a/dm/ios/Sources/front_ios.m
++++ b/dm/ios/Sources/front_ios.m
+@@ -167,6 +167,7 @@ static void tv_detach(void) {
+     if (g_tv_mode_was >= 0) { dm_set_opmode(g_tv_mode_was); g_tv_mode_was = -1; }
+     LOG("front end: TV disconnected, the picture is back on the phone");
+ }
++int front_ios_tv(void) { return g_tv != nil; }   // the Settings sheet: the console mode is the TV's (docked) while one is connected
+ @interface DmTVSceneDelegate : UIResponder <UIWindowSceneDelegate>
+ @property (strong, nonatomic) UIWindow *window;
+ @end
+@@ -199,22 +200,32 @@ static void front_ios_power_watch(void) {
+ // Frame-rate counter: the frames put on screen in the last second (nvn_mtl.m counts them for NVN and for the Vulkan layer alike; frames the display link merged away are not counted).
+ // On when the IPA was built with it (the NSP script's SHOW_FPS / --show-fps → DMShowFPS in Info.plist); DM_SHOW_FPS=0 / 1 in Documents/env.txt overrides that without a rebuild. NULL when off
+ uint64_t mtl_present_count(void);
+-static UILabel *front_ios_fps_label(void) {
+-    const char *e = getenv("DM_SHOW_FPS");
+-    if (!(e ? atoi(e) != 0 : [[NSBundle.mainBundle objectForInfoDictionaryKey:@"DMShowFPS"] boolValue])) return nil;
++static UILabel *fps_label_new(void) {
+     UILabel *l = [UILabel new];
+     l.font = [UIFont monospacedDigitSystemFontOfSize:13 weight:UIFontWeightSemibold]; l.textColor = UIColor.whiteColor; l.textAlignment = NSTextAlignmentCenter;
+     l.backgroundColor = [UIColor colorWithWhite:0 alpha:0.45]; l.layer.cornerRadius = 6; l.layer.masksToBounds = YES; l.userInteractionEnabled = NO;
+     l.text = @"-- fps";
+-    __block uint64_t n0 = mtl_present_count(); __block double t0 = CACurrentMediaTime();
++    __block uint64_t n0 = mtl_present_count(); __block double t0 = CACurrentMediaTime(); __weak UILabel *wl = l;
+     [NSTimer scheduledTimerWithTimeInterval:1.0 repeats:YES block:^(NSTimer *t) {
+-        (void)t; uint64_t n = mtl_present_count(); double now = CACurrentMediaTime();
+-        if (now - t0 < 1.5) l.text = [NSString stringWithFormat:@"%.0f fps", (n - n0) / (now - t0)];   // a longer span is the time in the background: no reading
++        UILabel *s = wl; if (!s) { [t invalidate]; return; }   // the Settings sheet turned the counter off
++        uint64_t n = mtl_present_count(); double now = CACurrentMediaTime();
++        if (now - t0 < 1.5) s.text = [NSString stringWithFormat:@"%.0f fps", (n - n0) / (now - t0)];   // a longer span is the time in the background: no reading
+         n0 = n; t0 = now;
+     }];
+     LOG("front end: frame-rate counter on");
+     return l;
+ }
++static UILabel *front_ios_fps_label(void) {
++    const char *e = getenv("DM_SHOW_FPS");
++    return (e ? atoi(e) != 0 : [[NSBundle.mainBundle objectForInfoDictionaryKey:@"DMShowFPS"] boolValue]) ? fps_label_new() : nil;
++}
++// The Settings sheet's switch: the counter shown or taken away now
++int front_ios_fps(void) { return g_root.fps != nil; }
++void front_ios_fps_set(int on) {
++    if (!g_root.game || !on == !g_root.fps) return;
++    if (on) { g_root.fps = fps_label_new(); [g_root.view addSubview:g_root.fps]; [g_root.view setNeedsLayout]; }
++    else { [g_root.fps removeFromSuperview]; g_root.fps = nil; LOG("front end: frame-rate counter off"); }
++}
+ 
+ // Progress screen of the prepare step (front.h front_progress): a dark view over the game's view and the pad, the title, a bar and a count, centered; UIKit views, so it draws while the game's thread waits
+ static UIView *g_prog; static UILabel *g_prog_count; static UIProgressView *g_prog_bar; static UILabel *g_prog_title;
 diff --git a/dm/ios/project.yml b/dm/ios/project.yml
 index 5be3a4c..2cc11e0 100644
 --- a/dm/ios/project.yml
@@ -8470,6 +10249,25 @@ index 5be3a4c..2cc11e0 100644
          UISupportedInterfaceOrientations:
            - UIInterfaceOrientationLandscapeRight
            - UIInterfaceOrientationLandscapeLeft
+diff --git a/dm/ios/tools/gen_build.py b/dm/ios/tools/gen_build.py
+index 66a9d8b..da2eafe 100644
+--- a/dm/ios/tools/gen_build.py
++++ b/dm/ios/tools/gen_build.py
+@@ -2,7 +2,7 @@
+ # without hand-copying lists: when the Makefile changes, the next iOS build follows automatically.
+ #   Gen/src/<flat name>   symlinks to source files (excluding main.c and front_mac.m; main.c is linked separately to Gen/main/main.c and compiled with -Dmain=dm_main)
+ #   stdout            xcconfig lines: HEADER_SEARCH_PATHS (-I directories + the directory of every source file, so relative includes resolve as usual),
+-#                     OTHER_CFLAGS (-D), frameworks (Cocoa is replaced by what the UIKit side already has, skipped)
++#                     OTHER_CFLAGS (-D), frameworks (Cocoa is replaced by what the UIKit side already has, and Carbon is the Mac Settings window's alone: both skipped)
+ # Usage: gen_build.py <dm/host dir> <Gen dir>
+ import os, shlex, subprocess, sys
+ host, gen = os.path.abspath(sys.argv[1]), os.path.abspath(sys.argv[2])
+@@ -41,4 +41,4 @@ for s in srcs:
+     os.symlink(s, f'{gen}/src/{flat}')
+ print('HEADER_SEARCH_PATHS = $(inherited) ' + ' '.join(f'"{d}"' for d in incs + dirs))
+ print('OTHER_CFLAGS = $(inherited) ' + ' '.join(defs))
+-print('DM_FRAMEWORKS = ' + ' '.join(f'-framework {f}' for f in fws if f != 'Cocoa'))
++print('DM_FRAMEWORKS = ' + ' '.join(f'-framework {f}' for f in fws if f not in ('Cocoa', 'Carbon')))
 diff --git a/dm/mac/launcher.c b/dm/mac/launcher.c
 index df4ade9..064885a 100644
 --- a/dm/mac/launcher.c
@@ -8811,3 +10609,45 @@ index 4bb97df..1a2d345 100644
        ]
      }
    }
+diff --git a/docs/playing.md b/docs/playing.md
+index 0287b56..f2d3681 100644
+--- a/docs/playing.md
++++ b/docs/playing.md
+@@ -14,6 +14,25 @@ In 3D, the right stick (the camera in most games) is not drawn: swipe on the rig
+ 
+ A connected game controller hides the touch controls and keeps every button.
+ 
++## Settings during the game
++
++A Settings window over the running game changes the controls and the settings that take effect at once.
++
++- **Opening it:**
++  - **Mac:** press F1 (fn-F1 on most Mac keyboards), or choose **Settings…** (⌘,) in the app menu.
++  - **iPhone and iPad:** press Home on a controller, or hold the **2D** / **3D** / **Tap** button for a moment.
++- **Keyboard** (Mac): click a button, then press its new key. A key another button had swaps with it, and Esc cancels. Esc, F1, F11, Caps Lock and Command stay with the game window. Shift, Control and Option can be bound like any key.
++- **Controller:** one map for every controller. Tap or click a Switch button, then press the controller button for it or pull a trigger; Home can't be bound.
++  - **Player 1:** choose a connected controller from the list, or press **Choose by pressing a button** and then press any button on the controller you want. The old player 1 takes its place. That controller stays player 1 whenever it connects, until you tap **Forget**.
++- **Graphics:** **Console mode** and **Upscaling** on both, **Display mode** on the Mac, **Frame-rate counter** on the iPhone. They change the game at once and are kept as your choices for the next start. A setting fixed by `env.txt` is greyed out, and on a TV the console mode stays docked.
++- **Reset to defaults** puts the page shown back: the default keys, or the controllers' own layout.
++
++Changes are saved at once to `controls.json`:
++- **Mac:** `~/Library/Application Support/nxnative/<title ID>/controls.json`
++- **iPhone and iPad:** the app's Documents, in the Files app.
++
++It's the same file format as the Windows and Linux builds, so a copied file works there too. A two-button combination or a keyboard on the iPhone isn't supported.
++
+ ## Rumble
+ 
+ Game vibration uses the iPhone's haptic engine or a compatible connected controller. Controllers with separate left/right haptic outputs keep those effects separate. The settings screen's **Game rumble** and **Rumble strength** control it independently of **Touch feedback**. Phone rumble approximates the Switch's effects; physical feel and controller compatibility still need device testing.
+diff --git a/docs/settings.md b/docs/settings.md
+index 0f992d4..7b921e0 100644
+--- a/docs/settings.md
++++ b/docs/settings.md
+@@ -1,6 +1,6 @@
+ # Settings
+ 
+-The screen before the game starts shows the settings the game supports. A setting that only matters while another is on appears under it and disappears when that one is turned off. Tap **Play** to start; the app remembers your choices for the next start. All settings are on one scrollable screen, under **Game**, **Controls** and **Performance**. Tap a menu or move a slider there; no settings page needs opening. **Upscaling** is in **Game**, beside **Console mode**. A Mac app shows the same settings in a [window of its own](#the-mac-settings-window).
++The screen before the game starts shows the settings the game supports. A setting that only matters while another is on appears under it and disappears when that one is turned off. Tap **Play** to start; the app remembers your choices for the next start. All settings are on one scrollable screen, under **Game**, **Controls** and **Performance**. Tap a menu or move a slider there; no settings page needs opening. **Upscaling** is in **Game**, beside **Console mode**. A Mac app shows the same settings in a [window of its own](#the-mac-settings-window). Console mode, upscaling, the Mac's display mode and the iPhone's frame-rate counter can also be changed while the game runs, with the controls ([Settings during the game](playing.md#settings-during-the-game)).
+ 
+ - [Tested defaults](#tested-defaults)
+ - [Game](#game): [Frame rate](#frame-rate), [Render scale](#render-scale), [Console mode](#console-mode), [Upscaling](#upscaling), [Game language](#game-language), [Frame-rate counter](#frame-rate-counter)

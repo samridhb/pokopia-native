@@ -84,8 +84,8 @@ or together, [below](#link-play-co-op-between-our-builds)), **Controls** (**Keyb
   press the key you want for it (a key another action had swaps over); **Reset to defaults** brings the layout above back. Keys count by
   their place on the keyboard, so the map works the same under any keyboard language. It is saved for this PC in
   `%APPDATA%\Pokopia Native\controls.json`, and the game's log lists the keys it uses. (If you ticked "Don't ask again",
-  double-click **`Pokopia Settings <version>.exe`** beside the Play launcher.) Esc, F11, Alt and the Windows keys can't be used. The Mac and the iPhone keep
-  their own layout for now.
+  double-click **`Pokopia Settings <version>.exe`** beside the Play launcher.) Esc, F11, Alt and the Windows keys can't be used. The Mac and the iPhone change
+  theirs in their own settings window ([Mac](MAC.md#controls), [iPhone](IPHONE.md#controls)).
 - **Controllers:** Xbox, PlayStation and Switch Pro controllers work as Switch controllers (face buttons by position),
   with rumble and motion. So does the Steam Controller, and many less common controllers through SDL's community list
   (`gamecontrollerdb.txt` beside the game); one the list doesn't know gets a guessed layout instead of being ignored, and
