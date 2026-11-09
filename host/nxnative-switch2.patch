@@ -186,7 +186,7 @@ index 9bcce1a..ee7bcf2 100644
  // Generated file (dm/gfx/tools/dmsh_chain.py --header): the B shader library translation chain version this source tree expects (default options), one for every game;
  // the host loads only <library dir>/b-<V>/. Run dmsh_chain.py --header after changing the chain's tools and commit this file with the change
 -#define DMSH_CHAIN "a7dbbce711c3"
-+#define DMSH_CHAIN "cac032d8de97"
++#define DMSH_CHAIN "2799c08da8e9"
 diff --git a/dm/gfx/nvn/hle_nvn.c b/dm/gfx/nvn/hle_nvn.c
 index 5e73d6d..7257c12 100644
 --- a/dm/gfx/nvn/hle_nvn.c
