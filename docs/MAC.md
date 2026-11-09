@@ -233,8 +233,8 @@ The Mac app runs on its own Metal engine, so Windows' Resolution setting, Wide v
 
 ## The app icon
 
-Out of the box the apps get a blank default icon, because the game's own icon isn't part of a dump. `python3.12 nxs2.py icon "<build folder>"`
-makes one from your game: it starts the game on a copy of your save, takes a picture of the title screen and cuts the Pokopia logo out of it.
+Out of the box the apps get Pokopia Native's own icon, because the game's own icon isn't part of a dump. `python3.12 nxs2.py icon "<build folder>"`
+makes one from your game instead: it starts the game on a copy of your save, takes a picture of the title screen and cuts the Pokopia logo out of it.
 It needs a save that is past the game's opening (play a little first, or point it at one with `--save <folder>`). Or give it a screenshot of
 the title screen from your Switch 2 (Capture button): `python3.12 nxs2.py icon "<build folder>" title.jpg`. Then build again with the same
 command; it only repacks the apps.

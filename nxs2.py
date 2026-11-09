@@ -226,7 +226,7 @@ class Build:
         self.outputs = self.out / 'out'; self.rundir = self.out / 'run'; self.phone = self.out / 'phone'
         self.win = self.out / 'windows'   # the Windows game: program.db, game.dll, the Vulkan shaders, the runtime, play.json
         self.lin = self.out / 'linux'     # the Linux game: the same, with game.so
-        self.icon = self.out / 'icon.png'   # the apps' icon, made by nxs2.py icon from your own game; none = the blank default
+        self.icon = self.out / 'icon.png'   # the apps' icon, made by nxs2.py icon from your own game; none = Pokopia Native's (APP_ICON)
         vf = self.out / 'version.txt'   # the game version the apps carry, from the dump's build line (build writes it, refresh reads it)
         self.version = vf.read_text().strip() if vf.is_file() else '1.0.5'
         self.game = read_game_tsv(PROFILE_SRC / 'game.tsv')
@@ -888,7 +888,8 @@ def st_mac_app(b):
     cmd = [PY, NX / 'dm/mac/pack_app.py', app, '--host', b.host, '--patched', b.patched, '--romfs', b.romfs_img, '--msl', b.lib(), '--tables', b.profile,
            '--font', b.font, '--title-id', TITLE, '--name', NAME, '--bundle-id', f'org.nxnative.{TITLE.lower()}', '--lang', 'en-US', '--sign', '-',
            '--version', b.version, '--category', b.game['app_category'][0], '--marker', b.game['romfs_marker'][0], '--env-file', envf, '--settings', settings]
-    if b.icon.is_file(): cmd += ['--icon', b.icon]
+    icon = app_icon(b, 'mac')
+    if icon: cmd += ['--icon', icon]
     say('packing the Mac app')
     run(cmd, b.logs / 'pack_app.log', env=b.env(), show=r'^step:|^app:')
     if not (app / 'Contents/MacOS/dmhost').is_file(): raise Fail(f'no app at {app}')
@@ -901,7 +902,7 @@ def st_mac_app(b):
 def ipa_env(b):
     return b.env(W=str(b.out / 'ipa'), PATCHED=str(b.patched), ROMFS=str(b.romfs_img), MSL_IOS=str(b.ios), AOC='', DM_COPY_ROMFS='NO',
                  DM_ENTITLEMENTS=str(b.profile / 'pokopia.entitlements'), FONT_PY=PY, DM_SHOW_FPS='1', DM_PSO_GPUS='none', DM_ENV_FILE=str(b.out / 'phone_env.txt'),
-                 DM_ICON=str(b.icon if b.icon.is_file() else b.out / 'no-icon'),   # build_ipa.sh otherwise looks for an icon.jpg beside the RomFS image
+                 DM_ICON=str(app_icon(b, 'ios') or b.out / 'no-icon'),   # build_ipa.sh otherwise looks for an icon.jpg beside the RomFS image
                  PATH=os.path.expanduser('~/.local/bin') + ':' + b.env().get('PATH', os.environ.get('PATH', '')))
 
 
@@ -926,7 +927,7 @@ def st_ipa_windows(b):
     out = b.outputs / f'{NAME.replace(" ", "")}-unsigned.ipa'
     env = b.env(W=str(b.out / 'ipa'), PATCHED=str(b.patched), ROMFS=str(b.romfs_img), MSL_IOS=str(b.ios), AOC='', DM_ENV_FILE=str(b.out / 'phone_env.txt'), DM_SHOW_FPS='1',
                 DM_PSO_GPUS='none', DM_LANG='en-US', DM_BUNDLE_ID=f'org.nxnative.{TITLE.lower()}', NXW_EXTENDED_VA='1', NXW_ROMFS_SEPARATE='1', NXW_ENTITLEMENTS='1',
-                DM_ICON=str(b.icon if b.icon.is_file() else b.out / 'no-icon'))
+                DM_ICON=str(app_icon(b, 'ios') or b.out / 'no-icon'))
     (b.out / 'ipa').mkdir(parents=True, exist_ok=True)
     for old in (out, out.with_name(out.name + '.idx')):   # pack_ipa.py reuses an existing IPA through its .idx with os.pread, which Windows lacks: pack it whole instead
         if old.exists(): old.unlink()
@@ -1092,6 +1093,14 @@ SAVES_ROOT = r'%APPDATA%\Pokopia Native'       # the Windows game's saves, one p
 WORK_ROOT = r'%LOCALAPPDATA%\Pokopia Native'   # its pipeline cache, temp files and logs: <root>\<version>
 RUNTIME_INSTALLER = ('tools/s2_dumps.py', 'tools/lower_corpus.py', 'tools/s2_pkg.py', f'profile/{TITLE}/runtime_keys.tsv')   # the on-demand path's steps
 LINUX_LAUNCHER = ('linux/play_window.py', 'nxs2.py', 'nxs2_gui.py', 'icon/pokopia-native-256.png')   # play.sh's launcher window, the update check and the look it takes from here
+APP_ICON = {'mac': 'icon/pokopia-native-mac-1024.png', 'ios': 'icon/pokopia-native-ios-1024.png'}   # the iPhone's is opaque: iOS rounds it and shows transparency black
+
+
+def app_icon(b, kind):
+    """The apps' icon: the one made from your own game (nxs2.py icon), else Pokopia Native's own; None when neither is there"""
+    if b.icon.is_file(): return b.icon
+    p = b.lin / 'runtime/installer/icon/pokopia-native-256.png' if kind == 'linux' else HERE / APP_ICON[kind]
+    return p if p.is_file() else None
 
 
 def win_env(t):
@@ -1425,7 +1434,7 @@ exec "$(cd "$(dirname "$0")" && pwd)/play-pokopia-{b.version}.sh" "$@"
     st.chmod(0o755)
     desk = b.outputs / f'pokopia-{b.version}.desktop'   # double-clickable in a file manager, and what Steam's "Add a Non-Steam Game" lists once installed
     desk.write_text(f'[Desktop Entry]\nType=Application\nName=Pokemon Pokopia {b.version}\nComment=pokopia-native {TOOL_VERSION}, built from your own dump\n'
-                    f'Exec="{sh}"\nTerminal=false\nCategories=Game;\n' + (f'Icon={b.icon}\n' if b.icon.is_file() else ''), encoding='utf-8')
+                    f'Exec="{sh}"\nTerminal=false\nCategories=Game;\n' + (f'Icon={app_icon(b, "linux")}\n' if app_icon(b, 'linux') else ''), encoding='utf-8')
     desk.chmod(0o755)
     say(f'Linux game: {sh}  (the choice again: {st.name} beside it; save: {linux_save_dir(b)})')
     return sh

@@ -332,8 +332,9 @@ update with Intel's 2024 microcode fix (0x12B or newer) for that; **Check tools*
 The output is `<build folder>\out\PokemonPokopia-unsigned.ipa`: the app without the game files, its executable carrying
 the two kernel entitlements in an ad-hoc signature, plus `romfs.id`, the identity of your game image.
 
-For the home-screen icon, take a screenshot of the game's title screen on your Switch 2 (Capture button), copy it to the
-PC and run `python nxs2.py icon "<build folder>" title.jpg` before the build (or build again afterwards).
+The app's home-screen icon is Pokopia Native's own. For one made from your game, take a screenshot of the game's title screen on your
+Switch 2 (Capture button), copy it to the PC and run `python nxs2.py icon "<build folder>" title.jpg` before the build (or build again
+afterwards).
 
 ### Sign and install
 
