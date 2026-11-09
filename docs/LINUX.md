@@ -115,15 +115,23 @@ step is one command; copy them as they are.
 ~/Games/Pokopia_native/out/play-pokopia-2.0.1.sh
 ```
 
-(the file is named after your game version: `ls ~/Games/Pokopia_native/out/`). A small window asks how to play first: alone, or Link Play. The first
+(the file is named after your game version: `ls ~/Games/Pokopia_native/out/`). A window opens first: how to play (alone, Link Play on your
+network, or over the internet), the picture's basics (console mode, window or full screen, anti-aliasing, frame rate, the FPS counter) and
+**Check for updates**. Where it cannot open (a Python without Tk), the same questions come as the desktop's dialogs or in the terminal. The first
 start translates the shaders the game makes while it runs: for about a minute the ground and some menus may be white. That is expected. After
-"don't ask again", `pokopia-settings-<version>.sh` beside it asks again, then starts the game.
+"ask again next time" is off, `pokopia-settings-<version>.sh` beside it brings the window back, then starts the game.
+
+**Updates:** once a day the game's launcher asks GitHub for the latest release's version (one request; nothing about you, the game or the
+computer is sent beyond what any web request carries). When a newer one is out it says so in its window, or in a small window of its own beside
+the game when the window is not shown (in Steam's Game Mode, only a line in the terminal). **Download** opens the release
+page; the builder's **Update my game** keeps your save and settings. **Check for updates** in the window turns it off for the launcher and the
+builder alike (it is `"check": false` in `~/.local/share/pokopia-native/updates.json`).
 
 - **Controls**: the Steam Deck's own controls work as a Switch controller (A/B/X/Y by position, the sticks, the triggers). Keyboard and mouse:
   WASD to move, the mouse to look (click the picture; Esc releases the mouse), J/K/U/I for A/B/X/Y, Return for +, Tab for −, F11 for full screen.
 - **Settings in the game**: **F1**, or **−** and **+** together on a controller (the Steam Deck's View and Menu buttons, either side of the screen),
-  opens the settings over the game: the picture (Resolution, window or full screen, Upscaling, 30 fps, Vsync, an FPS counter) and the keyboard's
-  keys. Changes apply at once (Console mode from the next start) and are kept in `~/.config/pokopia-native/` for the next start.
+  opens the settings over the game: the picture (Resolution, window or full screen, Upscaling, Anti-aliasing, 30 fps, Vsync, an FPS counter)
+  and the keyboard's keys. Changes apply at once (Console mode from the next start) and are kept in `~/.config/pokopia-native/` for the next start.
 - **On a Steam Deck the game starts in its handheld mode**: its own lighter settings (about a quarter less graphics work). **F1 → Console mode →
   Docked (TV)** switches back from the next start, and that choice is kept.
 - **Your save**: `~/.local/share/pokopia-native/<version>/save`. To bring your save from Windows, a Mac or the phone:
