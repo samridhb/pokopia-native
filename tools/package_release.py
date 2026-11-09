@@ -131,6 +131,19 @@ def scrub_pdb_path(b):
     return bytes(out)
 
 
+def check_mac_lock(entries):
+    """The Mac shader chain refuses translator DLLs whose fingerprints differ from dmsh_chain.lock (added by the host patch): the download's DLLs, as
+    packed, must match it (1.4.0 shipped a scrubbed dmsh_xlate.dll against the unscrubbed one's fingerprint, and every Mac build stopped there)"""
+    d = dict((n, b) for n, b, _ in entries)
+    patch = d.get('host/nxnative-switch2.patch', b'').decode('utf-8', 'replace')
+    lock = dict(re.findall(r'^\+(\S+\.dll)\t([0-9a-f]{16})$', patch.split('+++ b/dm/gfx/tools/dmsh_chain.lock', 1)[-1].split('\ndiff --git', 1)[0], re.M))
+    if not lock: sys.exit('refusing: the host patch has no dmsh_chain.lock fingerprints for the translator DLLs')
+    for name, want in lock.items():
+        b = d.get(f'host/dmsh_xlate_bin/{name}')
+        if b is None or hashlib.sha256(b).hexdigest()[:16] != want:
+            sys.exit(f'refusing: the Mac download\'s host/dmsh_xlate_bin/{name} does not match dmsh_chain.lock ({want}); update the lock in host/nxnative-switch2.patch')
+
+
 def linux_kit_files(src, a):
     """{name in linux/bin: (source path, where it comes from)}"""
     bld = pathlib.Path(a.linux_build)
@@ -307,6 +320,7 @@ def main():
         # Only the translator's: the kit's DLLs include Microsoft's signed runtime, which an edit would unsign
         xl = lambda n: '/dmsh_xlate_bin/' in f'/{n}'
         entries = [(n, scrub_pdb_path(d) if xl(n) and n.endswith('.dll') else d, m) for n, d, m in entries if not (xl(n) and n.endswith('.pdb'))]
+        if plat == 'mac': check_mac_lock(entries)
         if plat == 'windows': entries += [(f'windows/bin/{n}', d, 0o644) for n, d in kit_blobs.items()]
         if plat == 'linux':
             kit_names = [n[3:] if n.startswith('../') else f'linux/bin/{n}' for n in lkit_blobs]
