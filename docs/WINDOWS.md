@@ -143,7 +143,9 @@ folder: Windows saves load on the Mac and the iPhone. [Saves](SAVES.md) has more
 
 ### Updating
 
-The builder tells you when a new version is out (it asks GitHub once a day; **Advanced** turns that off). **Download and update**
+The builder and the game's launcher tell you when a new version is out. They ask GitHub once a day for the latest version, and
+send nothing about you, your game or your PC. **Check for updates** in Pokopia Settings or in the builder's **Advanced** turns it
+off for both. In the launcher, **Download** opens the release page. **Download and update**
 on its first page does the steps below for you: it downloads the new release beside this one, checks it, and opens the new builder,
 which runs **Update my game**. By hand:
 
