@@ -134,6 +134,9 @@ builder alike (it is `"check": false` in `~/.local/share/pokopia-native/updates.
   and the keyboard's keys. Changes apply at once (Console mode from the next start) and are kept in `~/.config/pokopia-native/` for the next start.
 - **On a Steam Deck the game starts in its handheld mode**: its own lighter settings (about a quarter less graphics work). **F1 → Console mode →
   Docked (TV)** switches back from the next start, and that choice is kept.
+- **On a Steam Deck the game draws at the screen's own 1280x720**, with FXAA: drawing 1920x1080 only to shrink it onto the screen costs about a
+  quarter more graphics work for slightly smoother edges. **F1 → Resolution** and **F1 → Anti-aliasing** change it (1920x1080, SMAA), and that
+  choice is kept.
 - **Your save**: `~/.local/share/pokopia-native/<version>/save`. To bring your save from Windows, a Mac or the phone:
   `~/pokopia-venv/bin/python nxs2.py import-save ~/Games/Pokopia_native <the folder with B00, G00 and S00>`.
   The save that was there is kept beside it.
