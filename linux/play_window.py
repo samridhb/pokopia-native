@@ -97,7 +97,7 @@ def tk_or_none():
         import nxs2_gui as g
         root = tk.Tk(className='pokopia')
     except Exception: return None
-    root.withdraw(); g.linux_look(root); root.configure(bg=g.C['bg'])
+    root.withdraw(); g.linux_look(root); g.set_icon(root); root.configure(bg=g.C['bg'])
     return tk, g, root
 
 

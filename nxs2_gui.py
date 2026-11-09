@@ -105,6 +105,13 @@ def linux_look(root):
     return dpi
 
 
+def set_icon(root):   # the window's and the taskbar's icon on Windows and Linux (a Mac takes the app's own, AppIcon.icns)
+    try:
+        p = HERE / 'icon' / 'pokopia-native-256.png'
+        if p.is_file() and not MAC: root._icon = tk.PhotoImage(master=root, file=str(p)); root.iconphoto(True, root._icon)
+    except tk.TclError: pass
+
+
 class NativeDialogs:
     """Linux: tkinter's messagebox and filedialog calls shown by the desktop's own dialogs: kdialog on KDE (the Steam Deck's desktop), else zenity,
     else the other one; Tk's X11 dialogs only when neither is installed. Pickers open in the given folder, else the home folder (never "/")."""
@@ -312,6 +319,7 @@ class App(tk.Tk):
     def __init__(self, update_build=None):
         super().__init__()
         self.title(f'Pokopia Native Builder {tool_version()}')
+        set_icon(self)
         if LINUX:
             global messagebox, filedialog
             linux_look(self); messagebox = filedialog = linux_dialogs(lambda: self)

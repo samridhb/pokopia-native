@@ -73,7 +73,7 @@ echo "$VER" > "$P/VERSION"
   [ -z "$TKXFT" ] || sha256sum "$P/python/lib/tk-xft/libtcl9tk9.0.so" | cut -d' ' -f1; } | sha256sum | cut -c1-16 > "$P/ID"
 cp "$HERE/AppRun" "$A/AppRun" && chmod +x "$A/AppRun"
 cp "$HERE/pokopia-native-builder.desktop" "$A/"
-"$PY" "$HERE/make_icon.py" "$A/pokopia-native-builder.png" "$(fc-match -f '%{file}' 'DejaVu Sans:bold')"
+cp "$HERE/../../icon/pokopia-native-256.png" "$A/pokopia-native-builder.png"   # the project's icon (icon/; nothing from the game)
 ln -s pokopia-native-builder.png "$A/.DirIcon"
 
 say "scanning the contents"

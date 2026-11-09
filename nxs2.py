@@ -1091,7 +1091,7 @@ def sign(args):
 SAVES_ROOT = r'%APPDATA%\Pokopia Native'       # the Windows game's saves, one per game version: <root>\<version>\save
 WORK_ROOT = r'%LOCALAPPDATA%\Pokopia Native'   # its pipeline cache, temp files and logs: <root>\<version>
 RUNTIME_INSTALLER = ('tools/s2_dumps.py', 'tools/lower_corpus.py', 'tools/s2_pkg.py', f'profile/{TITLE}/runtime_keys.tsv')   # the on-demand path's steps
-LINUX_LAUNCHER = ('linux/play_window.py', 'nxs2.py', 'nxs2_gui.py')   # play.sh's launcher window, the update check and the look it takes from here
+LINUX_LAUNCHER = ('linux/play_window.py', 'nxs2.py', 'nxs2_gui.py', 'icon/pokopia-native-256.png')   # play.sh's launcher window, the update check and the look it takes from here
 
 
 def win_env(t):
