@@ -35,6 +35,10 @@ always will be: if anyone asks you to pay for it, it isn't us.
   download carried a shader translator whose fingerprint didn't match the builder's list, so every Mac build, the iPhone app built on a Mac
   included, stopped there. 1.4.1 builds through again; thanks to the player who reported it. If you're on 1.4.0, just use 1.4.1: open its
   builder and choose **Update my game**.
+- **Fixed, we think: flowing water and soft effects on the Mac and iPhone** ([#42](https://github.com/xFractals/pokopia-native/issues/42),
+  thanks **xaviergodbout**). Some of the game's effects read the depth of what was just drawn; Apple's graphics chips hadn't stored it yet,
+  so they got the previous frame's. Released water could show as faint white panels, with the ground behind it smearing as the camera
+  moved. The depth is now stored first. We couldn't reach that water ourselves yet, so please tell us how it looks.
 - **New: settings on the Mac.** Press **F1** (fn-F1 on most Mac keyboards) or choose **Settings… (⌘,)** in the app menu, and a window opens
   over the game:
   - **Keyboard:** click a button, then press the key you want; if that key was already used, the two swap. Esc cancels, and **Reset to
