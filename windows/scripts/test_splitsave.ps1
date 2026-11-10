@@ -1,5 +1,6 @@
 # test_splitsave.ps1 (ctest scripts.split_save): New-SplitSave (splitsave.ps1) on stand-in saves: the copy differs from the player's save only in the user ID,
-# the player's save stays as it was, the split save is made once and then kept, the same save gives the same ID again, and the cases it must refuse
+# the player's save stays as it was, the split save is made once and then kept, the same save gives the same ID again, and the cases it must refuse;
+# then split.ps1's two layouts (dry runs)
 param([string]$Repo = (Join-Path $PSScriptRoot ".."))
 $ErrorActionPreference = "Stop"
 . (Join-Path $Repo "scripts\splitsave.ps1")
@@ -48,6 +49,17 @@ try {
     Throws { New-SplitSave $p $j } "refuses a folder that holds something else"
     [System.IO.File]::WriteAllBytes("$e\x", [byte[]](1)); New-Item -ItemType Directory -Force "$e\S00" | Out-Null; [System.IO.File]::WriteAllBytes("$e\S00\SYDAT.BIN", [byte[]](1, 2, 3))
     Throws { New-SplitSave $e (Join-Path $t "e3") } "refuses a SYDAT.BIN without the game's magic"
+    # split.ps1's layouts (dry runs on a stand-in 1920x1080 screen): stacked by default, each half 1920x540, wider than 16:9, so the wide view is on;
+    # side by side, 960x1080 halves: off (the picture keeps its bars)
+    $split = Join-Path $Repo "scripts\split.ps1"; $env:SPLIT_SCREEN = "1920x1080"
+    try {
+        $o = @(& powershell -NoProfile -ExecutionPolicy Bypass -File $split -Save $p -Work (Join-Path $t "work") -DryRun 2>&1 | ForEach-Object { "$_" })
+        $w = @($o | Where-Object { $_ -like "window *" })
+        Ok ($w.Count -eq 2 -and @($w | Where-Object { $_ -like "*DM_SPLIT_LAYOUT=stack *" -and $_ -like "*NXRT_VK_WIDE=1 *" }).Count -eq 2) "split.ps1: stacked by default, with the wide view"
+        $o = @(& powershell -NoProfile -ExecutionPolicy Bypass -File $split -Save $p -Work (Join-Path $t "work") -Layout side -DryRun 2>&1 | ForEach-Object { "$_" })
+        $w = @($o | Where-Object { $_ -like "window *" })
+        Ok ($w.Count -eq 2 -and @($w | Where-Object { $_ -like "*DM_SPLIT_LAYOUT=side *" -and $_ -notlike "*NXRT_VK_WIDE*" }).Count -eq 2) "split.ps1 -Layout side: no wide view"
+    } finally { Remove-Item Env:SPLIT_SCREEN -ErrorAction SilentlyContinue }
 } finally { Remove-Item -Recurse -Force -LiteralPath $t -ErrorAction SilentlyContinue }
 if ($fail) { Write-Host "$fail failed"; exit 1 }
 Write-Host "all passed"

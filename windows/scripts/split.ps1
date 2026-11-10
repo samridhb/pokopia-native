@@ -1,14 +1,17 @@
-# split.ps1: split-screen co-op, two players on one PC (docs/split-screen.md). Two games side by side with Link Play between them over this PC (loopback):
+# split.ps1: split-screen co-op, two players on one PC (docs/split-screen.md). Two games, one in each half of the screen, with Link Play between them over
+# this PC (loopback):
 #   window 1 hosts with the player's save and takes the keyboard, the mouse and the first controller;
 #   window 2 visits with the split-screen save and plays the second controller, muted (-Sound2: with sound).
 # The split-screen save is made from the player's save the first time (scripts/splitsave.ps1: a copy with its own user ID, so the game lets it in) and kept;
 # the player's save is only read. Interact everywhere is on in both (in a story town the second player can do little without it); -Story turns Story co-op on.
-# -Keyboard: player 1 plays the keyboard and mouse only, player 2 the first controller. -Layout stack: above each other. Closing window 1 closes window 2.
+# -Keyboard: player 1 plays the keyboard and mouse only, player 2 the first controller. -Layout stack (the default): top and bottom, each window the
+# screen's full width; -Layout side: side by side. Each window fills its half; a half wider than 16:9 gets the wide view (NXRT_VK_WIDE), so the 3D fills
+# it. Closing window 1 closes window 2.
 # In the games: window 1 opens Link Play (Invite Others to Visit, Local connection); window 2 visits it (Visit a Friend, Local connection).
 # The paths are play.ps1's (-Config play.json, or -ExeFS / -Dll / -RomFS / -Save / -Work / -Exe / -Shaders); -SplitSave names the second save's folder.
 param(
     [string]$Config = "", [string]$ExeFS = "", [string]$Dll = "", [string]$RomFS = "", [string]$Save = "", [string]$Work = "", [string]$Exe = "", [string]$Shaders = "",
-    [string]$SplitSave = "", [int]$Port = 47660, [switch]$Story, [switch]$Keyboard, [ValidateSet("side", "stack")][string]$Layout = "side", [switch]$Sound2, [switch]$DryRun
+    [string]$SplitSave = "", [int]$Port = 47660, [switch]$Story, [switch]$Keyboard, [ValidateSet("side", "stack")][string]$Layout = "stack", [switch]$Sound2, [switch]$DryRun
 )
 $ErrorActionPreference = "Stop"
 $here = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
@@ -50,6 +53,14 @@ $a2 = $common + @("-Save", $SplitSave, "-Work", $Work2, "-CoopJoin", "127.0.0.1:
 $pad1 = if ($Keyboard) { "0" } else { "1" }; $pad2 = if ($Keyboard) { "1" } else { "2" }
 $env1 = @{ DM_SPLIT = "1"; DM_SPLIT_PAD = $pad1; DM_SPLIT_LAYOUT = $Layout; NXRT_VK_WINDOW = "960x540" }   # a window size keeps play.ps1 from going fullscreen
 $env2 = @{ DM_SPLIT = "2"; DM_SPLIT_PAD = $pad2; DM_SPLIT_LAYOUT = $Layout; NXRT_VK_WINDOW = "960x540" }
+# The halves as nxrt makes them (the main display's usable area); SPLIT_SCREEN=<w>x<h> stands in for it (tests)
+$area = $null
+if ($env:SPLIT_SCREEN -match '^(\d+)x(\d+)$') { $area = @{ Width = [int]$Matches[1]; Height = [int]$Matches[2] } }
+else { try { Add-Type -AssemblyName System.Windows.Forms; $area = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea } catch {} }
+if ($area -and -not $env:NXRT_VK_WIDE) {
+    $hw = if ($Layout -eq "side") { $area.Width / 2 } else { $area.Width }; $hh = if ($Layout -eq "side") { $area.Height } else { $area.Height / 2 }
+    if ($hw / $hh -gt 16 / 9 * 1.02) { $env1.NXRT_VK_WIDE = "1"; $env2.NXRT_VK_WIDE = "1" }
+}
 if ($env:SPLIT_CTL_DIR) {   # tests: each window's DM_CTL file (keys and screenshots), ctl-1.txt and ctl-2.txt there
     $env1.DM_CTL = Join-Path $env:SPLIT_CTL_DIR "ctl-1.txt"; $env2.DM_CTL = Join-Path $env:SPLIT_CTL_DIR "ctl-2.txt"; $env1.NXRT_VK_SHOT_WINDOW = "1"; $env2.NXRT_VK_SHOT_WINDOW = "1"
 }

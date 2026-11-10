@@ -51,8 +51,12 @@ static struct {
     VkBool32 dt, dw; VkCompareOp dcmp; VkBool32 st_en; VkStencilOp sop[2][3]; VkCompareOp scmp[2]; uint32_t scm[2], swm[2], sref[2]; VkBool32 rd, pr, fixed;
     uint32_t ncol; VkBool32 ben[8]; VkColorBlendEquationEXT beq[8]; VkColorComponentFlags wm[8]; VkBool32 logic_en; VkLogicOp lop; VkBool32 a2c; VkPolygonMode pm; VkBool32 dclamp;
     struct { VkBuffer b; VkDeviceSize o, n; } vb[17];
+    uint32_t vin, vi[2 + 17 * 4 + 32 * 4];          // the vertex input last set (counts, then each binding's and attribute's fields)
+    VkPipelineLayout dsl; VkDescriptorSet ds[8];    // the graphics descriptor sets bound with layout dsl, by set number
 } DC;
 static int g_dc_on = -1;
+static int g_keep_on = -1;   // NXRT_VK_BIND_KEEP=0: vertex input and descriptor sets set at every draw again, as before
+static int keep_on(void) { if (g_keep_on < 0) { const char *e = getenv("NXRT_VK_BIND_KEEP"); g_keep_on = !(e && *e == '0'); if (!g_keep_on) VKLOG("NXRT_VK_BIND_KEEP=0: vertex input and descriptor sets are set at every draw"); } return g_keep_on; }
 static void dc_reset(void) { memset(&DC, 0xff, sizeof DC); DC.cb = VK_NULL_HANDLE; }
 static inline int dc_chg(void *slot, const void *v, size_t n) { if (!memcmp(slot, v, n)) return 0; memcpy(slot, v, n); return 1; }
 
@@ -910,7 +914,13 @@ static void set_vertex_input(VkCommandBuffer cb, const vks_shader *vs, vkp_gkey 
                                                          div ? VK_VERTEX_INPUT_RATE_INSTANCE : VK_VERTEX_INPUT_RATE_VERTEX, div ? div : 1};
     }
     if (*use_zero) vb[nb++] = (VkVertexInputBindingDescription2EXT){VK_STRUCTURE_TYPE_VERTEX_INPUT_BINDING_DESCRIPTION_2_EXT, NULL, 16, 0, VK_VERTEX_INPUT_RATE_VERTEX, 1};
-    if (g_vkp_dyn.vertex_input) vkCmdSetVertexInputEXT(cb, nb, vb, na, va);
+    if (g_vkp_dyn.vertex_input) {   // only when it differs from what this command buffer has (DC): on RADV each call is a vertex-shader prolog lookup at the draw
+        uint32_t c[2 + 17 * 4 + 32 * 4], n = 0; c[n++] = nb; c[n++] = na;
+        for (uint32_t i = 0; i < nb; i++) { c[n++] = vb[i].binding; c[n++] = vb[i].stride; c[n++] = (uint32_t)vb[i].inputRate; c[n++] = vb[i].divisor; }
+        for (uint32_t i = 0; i < na; i++) { c[n++] = va[i].location; c[n++] = va[i].binding; c[n++] = (uint32_t)va[i].format; c[n++] = va[i].offset; }
+        if (!keep_on() || DC.vin != n || memcmp(DC.vi, c, n * sizeof *c)) { DC.vin = n; memcpy(DC.vi, c, n * sizeof *c); vkCmdSetVertexInputEXT(cb, nb, vb, na, va); }
+        else g_st.vin_kept++;
+    }
     else {   // baked into the pipeline
         k->nattr = (uint8_t)(na > 16 ? 16 : na); k->nbind = 0;
         for (uint32_t i = 0; i < k->nattr; i++) { k->attr[i].loc = (uint8_t)va[i].location; k->attr[i].bind = (uint8_t)va[i].binding; k->attr[i].fmt = va[i].format; k->attr[i].off = va[i].offset; }
@@ -1220,6 +1230,8 @@ static void draw(const p_draw *dw, const p_draw_idx *di) {
     if (!g_vkp_dyn.a2c) k.a2c = S->ms.a2c != 0;
     if (!g_vkp_dyn.polygon_mode) k.poly = (uint8_t)S->poly.mode;
     if (!g_vkp_dyn.depth_clamp) k.depth_clamp = S->depth_clamp != 0 && g_vk.f10.depthClamp;
+    if (g_dc_on < 0) { const char *e = getenv("NXRT_VK_STATE_CACHE"); g_dc_on = !(e && *e == '0'); }
+    if (cb != DC.cb || !g_dc_on) { dc_reset(); DC.cb = cb; }
     uint32_t used; int use_zero;
     set_vertex_input(cb, sh[0], &k, &used, &use_zero);
     VkPipelineLayout layout;
@@ -1228,8 +1240,6 @@ static void draw(const p_draw *dw, const p_draw_idx *di) {
     if (pipe != g_last_pipe) { vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe); g_last_pipe = pipe; }
     if (atest) { uint32_t pc[2] = {S->color.alpha_func, 0}; memcpy(&pc[1], &S->alpha_ref, 4); vkCmdPushConstants(cb, layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, VKP_ALPHA_PC_SIZE, pc); }
     // dynamic state, only what changed since the last draw recorded into this command buffer (DC)
-    if (g_dc_on < 0) { const char *e = getenv("NXRT_VK_STATE_CACHE"); g_dc_on = !(e && *e == '0'); }
-    if (cb != DC.cb || !g_dc_on) { dc_reset(); DC.cb = cb; }
     if (dc_chg(&DC.vp, &vp, sizeof vp)) vkCmdSetViewportWithCount(cb, 1, &vp);
     if (dc_chg(&DC.sc, &sc, sizeof sc)) vkCmdSetScissorWithCount(cb, 1, &sc);
     { VkBool32 one = 1; if (dc_chg(&DC.fixed, &one, sizeof one)) { vkCmdSetLineWidth(cb, 1.0f); vkCmdSetDepthBoundsTestEnable(cb, VK_FALSE); } }
@@ -1284,7 +1294,10 @@ static void draw(const p_draw *dw, const p_draw_idx *di) {
     for (int s = 0; s < 5; s++) if (sh[s]) {
         VkDescriptorSet ds = write_set(sh[s], s, &swrites);
         if (!ds) { g_st.draws_skipped++; return; }
-        vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, (uint32_t)sh[s]->set, 1, &ds, 0, NULL);
+        uint32_t si = (uint32_t)sh[s]->set;   // a set already bound at this number with this layout stays bound (DC): not bound again
+        if (DC.dsl != layout) { DC.dsl = layout; memset(DC.ds, 0, sizeof DC.ds); }
+        if (si >= 8 || DC.ds[si] != ds || !keep_on()) { vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, si, 1, &ds, 0, NULL); if (si < 8) DC.ds[si] = ds; }
+        else g_st.binds_kept++;
     }
     if (g_pd) {
         char b[400]; int o = 0;
@@ -1915,16 +1928,18 @@ void vkr_frame(uint64_t frame) {
     g_ts_n = g_ts_same = g_vp_n = g_vp_small = 0; g_vpw[0] = g_vph[0] = 1e9f; g_vpw[1] = g_vph[1] = 0;
     vkr_stats_t s = g_st; uint64_t df = frame - pf; vkp_stats_t ps; vkp_stats(&ps); uint64_t shl, shf; vksh_stats(&shl, &shf);
     VKLOG("replay up to frame %llu, per frame: %.1f draws (%.1f skipped: no shader %llu, no pipeline %llu, no target %llu, NXRT_VK_SKIP %llu in all), %.1f passes, %.1f dispatches, %.1f clears, "
-          "%.1f texture copies, %.1f buffer copies / updates / fills, %.1f descriptor sets (%.1f with render scales, %.1f more reused), %.1f write-backs; %llu graphics + %llu compute pipelines (%.1f ms creating, worst %.1f ms), %llu shaders (%llu unusable)",
+          "%.1f texture copies, %.1f buffer copies / updates / fills, %.1f descriptor sets (%.1f with render scales, %.1f more reused; %.1f set binds and %.1f vertex inputs kept from the draw before), %.1f write-backs; %llu graphics + %llu compute pipelines (%.1f ms creating, worst %.1f ms), %llu shaders (%llu unusable)",
           (unsigned long long)frame, (double)(s.draws - prev.draws) / df, (double)(s.draws_skipped - prev.draws_skipped) / df, (unsigned long long)s.skip_no_shader,
           (unsigned long long)s.skip_no_pipeline, (unsigned long long)s.skip_no_target, (unsigned long long)s.skip_named, (double)(s.passes - prev.passes) / df, (double)(s.dispatches - prev.dispatches) / df,
           (double)(s.clears - prev.clears) / df, (double)(s.tex_copies - prev.tex_copies) / df, (double)(s.copies + s.updates + s.fills - prev.copies - prev.updates - prev.fills) / df,
-          (double)(s.desc_sets - prev.desc_sets) / df, (double)(s.scaled_sets - prev.scaled_sets) / df, (double)(s.sets_reused - prev.sets_reused) / df, (double)(s.writebacks - prev.writebacks) / df, (unsigned long long)ps.graphics, (unsigned long long)ps.compute,
+          (double)(s.desc_sets - prev.desc_sets) / df, (double)(s.scaled_sets - prev.scaled_sets) / df, (double)(s.sets_reused - prev.sets_reused) / df, (double)(s.binds_kept - prev.binds_kept) / df, (double)(s.vin_kept - prev.vin_kept) / df, (double)(s.writebacks - prev.writebacks) / df, (unsigned long long)ps.graphics, (unsigned long long)ps.compute,
           ps.create_ns / 1e6, ps.max_ns / 1e6, (unsigned long long)shl, (unsigned long long)shf);
     if (ps.prewarmed) VKLOG("pipelines made ahead by the prewarm up to frame %llu: %llu (%.1f ms on its threads)", (unsigned long long)frame, (unsigned long long)ps.prewarmed, ps.prewarm_ns / 1e6);
     if (g_vk.has.buffer_marker) { uint64_t fin = 0, st = vk_markers_now(&fin); VKLOG("AMD buffer markers at frame %llu: started #%llu, everything before #%llu finished", (unsigned long long)frame, (unsigned long long)st, (unsigned long long)fin); }
     prev = s; pf = frame;
 }
+
+uint64_t vkr_gpu_ns_total(void) { return atomic_load(&g_gpu_ns); }
 
 int vkr_init(void) {
     if (vksh_init() || vkpl_init()) return -1;

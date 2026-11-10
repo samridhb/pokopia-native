@@ -2,6 +2,7 @@
 // Written from the Vulkan 1.3 specification. The list of optional features follows what the NVN replay needs; Ryujinx's VulkanInitialization.cs (MIT,
 // git.ryujinx.app) was read for which of them a Switch GPU's SPIR-V commonly uses.
 #include "vk_internal.h"
+#include "vk_shader.h"   // vkspv_sg32_emulate_wanted
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -280,16 +281,23 @@ int vk_dev_open(const vk_dev_opts *o, const char *const *inst_exts, uint32_t n_i
     // NVN's shaders are written for 32-lane warps (ballots read .x, shuffles clamp to lane 31, votes span 32): where the device's subgroups are another size
     // (AMD's 64, Intel's 8 to 32), the shaders that use subgroup operations are made with 32-lane ones wherever the driver lets a pipeline require it
     // (subgroup size control, Vulkan 1.3, enabled above with the other features). Opt-in until an AMD or Intel GPU has run it: NXRT_VK_SUBGROUP32=1 asks
-    // for 32 (also where it is the size), unset or 0 leaves the driver's size
+    // for 32 (also where it is the size), unset or 0 leaves the driver's size. Where subgroups may have 64 lanes the shaders are also rewritten so each
+    // 32-lane half acts as one warp (vkspv_sg32_emulate, #40: GCN has only 64; the same results where a pipeline gets 32), unless NXRT_VK_SUBGROUP32=0;
+    // =emulate rewrites them on any GPU (a test)
     const char *s32 = getenv("NXRT_VK_SUBGROUP32");
     int want = s32 && *s32 == '1';
+    h->sg32_emulate = vkspv_sg32_emulate_wanted(sg.subgroupSize, p13.maxSubgroupSize, s32);
     if (want && g_vk.f13.subgroupSizeControl && p13.minSubgroupSize <= 32 && p13.maxSubgroupSize >= 32) {
         h->sg32_stages = p13.requiredSubgroupSizeStages & (VK_SHADER_STAGE_ALL_GRAPHICS | VK_SHADER_STAGE_COMPUTE_BIT);
         h->sg32_max_wg = p13.maxComputeWorkgroupSubgroups; h->sg32_full = g_vk.f13.computeFullSubgroups != 0;
     }
-    if (want || sg.subgroupSize != 32) {
+    if (h->sg32_emulate)
+        VKLOG("subgroups of %u lanes (sizes %u to %u): shaders that use them act on 32-lane halves, as NVN's warps (#40; NXRT_VK_SUBGROUP32=0 leaves them)%s",
+              sg.subgroupSize, p13.minSubgroupSize, p13.maxSubgroupSize, s32 && !strcmp(s32, "emulate") ? " (NXRT_VK_SUBGROUP32=emulate)" : "");
+    if (want || (sg.subgroupSize != 32 && !h->sg32_emulate)) {
         if (h->sg32_stages) VKLOG("subgroups: shaders that use them are made with 32 lanes, as NVN's are (this GPU's own size %u; stages %#x%s)", sg.subgroupSize, h->sg32_stages,
                                   h->sg32_stages & VK_SHADER_STAGE_FRAGMENT_BIT ? "" : ": fragment shaders keep the GPU's size");
+        else if (h->sg32_emulate) VKLOG("subgroups: the driver cannot be asked for 32 lanes (control %d): the halves stand in", g_vk.f13.subgroupSizeControl);
         else if (!want) VKLOG("subgroups of %u lanes, left as the driver makes them (NXRT_VK_SUBGROUP32=1 makes shaders use 32, as NVN's do)", sg.subgroupSize);
         else VKRED("subgroups of %u lanes, and the driver cannot be asked for 32 (sizes %u to %u, control %d): shaders written for 32 may compute wrong results",
                    sg.subgroupSize, p13.minSubgroupSize, p13.maxSubgroupSize, g_vk.f13.subgroupSizeControl);

@@ -30,6 +30,7 @@ typedef struct vkt_image {
     // content
     int content;                         // 1 once uploaded, cleared or written by the GPU
     uint64_t stamp; const void *span;    // VKT_STORAGE: dirty-tracker stamp of the last upload
+    uint64_t checked_sub;                // VKT_STORAGE: the game submission (vks_sub_serial) whose recording last found it current
     uint64_t *phash; uint32_t npg;       // VKT_STORAGE: each storage page's hash at the last upload (pages written with the same bytes skip the upload)
     uint64_t uploads, last_frame, serial;
     int astc_fast;                       // levels / layers still at the fast ASTC pass

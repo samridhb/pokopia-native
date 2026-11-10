@@ -667,15 +667,22 @@ NVN(nvnQueueWaitSync, NVNboolean, NVNqueue *q, const NVNsync *s) { (void)q; stat
 // ZCull data: the host does no ZCull, so there is nothing to save / restore
 NVN(nvnCommandBufferRestoreZCullData, void, NVNcommandBuffer *c, NVNbufferAddress a, size_t n) { (void)c; (void)a; (void)n; }
 NVN(nvnCommandBufferSaveZCullData, void, NVNcommandBuffer *c, NVNbufferAddress a, size_t n) { (void)c; (void)a; (void)n; }
-static _Atomic uint64_t g_sync_ns;
+static _Atomic uint64_t g_sync_ns, g_sync_n, g_sync_lag, g_sync_lag_n;
+// A SyncWait that blocked: counted, with how many submissions the sync was behind the newest one when the wait began (0 = the game waits for what it
+// just submitted, so its thread, the replay and the GPU take turns instead of overlapping)
+static void sync_blocked(uint64_t seq) {
+    atomic_fetch_add(&g_sync_n, 1);
+    uint64_t last = rt_last_sub(); if (seq && last >= seq) { atomic_fetch_add(&g_sync_lag, last - seq); atomic_fetch_add(&g_sync_lag_n, 1); }
+}
 NVN(nvnSyncWait, NVNsyncWaitResult, const NVNsync *s, uint64_t timeout) {
     const sync_t *o = (const sync_t *)s;
     uint32_t fenced = o->fenced; uint64_t fence = o->fence;
     if (!fenced) return NVN_SYNC_WAIT_RESULT_TIMEOUT_EXPIRED;
-    uint64_t t0 = now_ns(); int waited = 0;
+    uint64_t t0 = now_ns(), seq = fenced >= 3 ? fence : 0; int waited = 0;
     if (fenced >= 3) {   // a submission's sequence number: its replay first, then its backend fence
         if (!rt_wait(fence, 0)) {
             if (!timeout) return NVN_SYNC_WAIT_RESULT_TIMEOUT_EXPIRED;
+            sync_blocked(seq);
             int ok = rt_wait(fence, timeout); atomic_fetch_add(&g_sync_ns, now_ns() - t0); waited = 1;
             if (!ok) return NVN_SYNC_WAIT_RESULT_TIMEOUT_EXPIRED;
             uint64_t el = now_ns() - t0; timeout = timeout == UINT64_MAX ? timeout : timeout > el ? timeout - el : 0;
@@ -684,6 +691,7 @@ NVN(nvnSyncWait, NVNsyncWaitResult, const NVNsync *s, uint64_t timeout) {
     }
     int (*w)(uint64_t, uint64_t) = fenced == 2 ? gfx_wait_acq : gfx_wait;
     if (w(fence, 0)) return waited ? NVN_SYNC_WAIT_RESULT_CONDITION_SATISFIED : NVN_SYNC_WAIT_RESULT_ALREADY_SIGNALED;
+    if (!waited && timeout) sync_blocked(seq);
     uint64_t t1 = now_ns(); int ok = w(fence, timeout); atomic_fetch_add(&g_sync_ns, now_ns() - t1);   // the frame's blocked SyncWait time (@sync_ms)
     return ok ? NVN_SYNC_WAIT_RESULT_CONDITION_SATISFIED : NVN_SYNC_WAIT_RESULT_TIMEOUT_EXPIRED;
 }
@@ -1302,12 +1310,16 @@ static uint64_t rt_value(uint64_t seq) {   // a replayed submission's backend fe
     return v;
 }
 static uint64_t rt_last_sub(void) { return atomic_load(&R.last_sub); }
+static _Atomic uint64_t g_drain_n, g_drain_ns;   // the game's waits for the whole replay queue (finalizes, readbacks, QueueFinish, MapVirtual)
 static void rt_drain(void) {
     if (!rt_on()) return;
+    uint64_t t0 = now_ns();
     pthread_mutex_lock(&R.mu); uint64_t s = R.seq; pthread_mutex_unlock(&R.mu);
     rt_wait(s, UINT64_MAX);
+    atomic_fetch_add(&g_drain_n, 1); atomic_fetch_add(&g_drain_ns, now_ns() - t0);
 }
 static uint64_t rt_busy_ns(void) { return atomic_load(&R.busy_ns); }
+uint64_t nvn_replay_busy_ns(void) { return rt_busy_ns(); }   // the replay thread's busy time so far (F1's Detailed counter)
 static const char *rt_stat_text(double ms) {   // for the frame pacing line (one thread writes it)
     static char b[96]; static uint64_t full0;
     uint64_t f = atomic_load(&R.full_waits);
@@ -1441,18 +1453,21 @@ static void frame_request(const char *what, int idx) {
 // The display: a screen at 60 Hz on a fixed vsync grid. A present returns at once (nxnative's present only enqueues for its display link) and is shown at the first
 // vsync at or after it, at least the window's interval after the frame before; that frame's texture stays on screen until then. Acquiring a texture waits while it
 // is still shown or queued, so a game that runs ahead of the display is held back by its swap chain, as on hardware, and a game that paces itself (Pokopia does,
-// on its own timer) is never blocked. The grid does not drift. A backend with a display of its own (gfx_link_active) paces the acquires instead
+// on its own timer) is never blocked. The grid does not drift. A backend with a display of its own (gfx_link_active) paces the acquires instead. Under a frame
+// rate cap that does not divide 60 the grid ticks at the cap's rate (present_pace)
 static SRWLOCK g_disp_lk = SRWLOCK_INIT;
-static uint64_t g_vs_t0, g_vs_k, g_free_at[4], g_vs_skipped; static _Atomic uint64_t g_acq_wait_ns; static int g_shown = -1;
-static uint64_t vsync_at(uint64_t k) { return g_vs_t0 + k * 1000000000ull / 60; }
-// Schedules the present of texture idx made at `now`: returns the time it is shown; *skipped = vsyncs before it that showed nothing new (tests drive it with their own clock)
-uint64_t nxrt_nvn_display(uint64_t now, int interval, int idx, unsigned *skipped) {
+static uint64_t g_vs_t0, g_vs_k, g_free_at[4], g_vs_skipped; static _Atomic uint64_t g_acq_wait_ns; static int g_shown = -1, g_vs_hz = 60;
+static uint64_t vsync_at(uint64_t k) { return g_vs_t0 + k * 1000000000ull / (uint64_t)g_vs_hz; }
+// Schedules the present of texture idx made at `now` on a grid of hz ticks a second: returns the time it is shown; *skipped = ticks before it that showed nothing
+// new (tests drive it with their own clock). A new rate starts its grid at `now`
+uint64_t nxrt_nvn_display(uint64_t now, int hz, int interval, int idx, unsigned *skipped) {
     AcquireSRWLockExclusive(&g_disp_lk);
     uint64_t k = 0; *skipped = 0;
-    if (!g_vs_t0) g_vs_t0 = now;
+    if (hz <= 0) hz = 60;
+    if (!g_vs_t0 || hz != g_vs_hz) { g_vs_t0 = now; g_vs_hz = hz; }
     else {
         uint64_t earliest = g_vs_k + (uint64_t)(interval > 0 ? interval : 1);
-        k = (now - g_vs_t0) * 60 / 1000000000ull;
+        k = (now - g_vs_t0) * (uint64_t)g_vs_hz / 1000000000ull;
         if (vsync_at(k) < now) k++;
         if (k > earliest) *skipped = (unsigned)(k - earliest);
         else k = earliest;
@@ -1469,16 +1484,24 @@ uint64_t nxrt_nvn_display(uint64_t now, int interval, int idx, unsigned *skipped
 uint64_t nxrt_nvn_texture_busy_until(int idx) {
     AcquireSRWLockShared(&g_disp_lk); uint64_t t = idx >= 0 && idx < 4 ? g_free_at[idx] : 0; ReleaseSRWLockShared(&g_disp_lk); return t;
 }
-// Vsyncs per frame: the game's present interval, at least 2 under a 30 fps cap (DM_FPS=30, the launcher's Frame rate: gfx_fps_target). nxnative runs its display link
-// at 30 Hz then (nvn_mtl.m mtl_fps_target), which holds the game's acquires; here each frame stays on screen two vsyncs and the swap chain holds them the same way
-static int present_itv(const win_t *o) {
+// The frame rate cap (gfx_fps_target: DM_FPS, the in-game menu). At 30 each frame stays on screen at least two 60 Hz vsyncs (nxnative runs its display link at
+// 30 Hz then, nvn_mtl.m mtl_fps_target), so the swap chain holds the game's acquires. 40, 45 and 50 do not divide 60: the display ticks at the cap's own rate
+// instead, a frame a tick (25, 22.2, 20 ms), and the host presents on that cadence (vk_present.c), even where the screen's refresh is a multiple (40 on 120 Hz)
+// or follows the frames (variable refresh). A game that asks for a longer interval than the cap keeps it. The ticks a frame stays on screen; *hz the display's rate
+static int present_pace(const win_t *o, int *hz) {
     static int last;   // the cap is read each frame: the in-game menu changes it
-    int cap = gfx_fps_target() == 30 ? 2 : 1;
-    if (cap != last) { if (cap == 2 || last) LOG("[nvn] frame rate cap %d: each frame stays on screen for at least %d vsync%s", cap == 2 ? 30 : 60, cap, cap > 1 ? "s" : ""); last = cap; }
-    int itv = o->interval > 0 ? o->interval : 1;
-    return itv > cap ? itv : cap;
+    int fps = gfx_fps_target(), itv = o->interval > 0 ? o->interval : 1;
+    if (fps != last) {
+        if (fps != 60 || last) LOG("[nvn] frame rate cap %d fps: %s", fps, fps == 60 ? "off" : fps == 30 ? "each frame stays on screen for at least 2 vsyncs" : "the display ticks at that rate");
+        last = fps;
+    }
+    *hz = 60;
+    if (fps == 30) return itv > 2 ? itv : 2;
+    if (fps == 60 || 60 / itv <= fps) return itv;   // the game's own rate is the cap's or lower
+    *hz = fps; return 1;
 }
-static uint64_t present_period(const win_t *o) { return (uint64_t)present_itv(o) * 1000000000ull / 60; }
+static int present_itv(const win_t *o) { int hz; return present_pace(o, &hz); }
+static uint64_t present_period(const win_t *o) { int hz, t = present_pace(o, &hz); return (uint64_t)t * 1000000000ull / (uint64_t)hz; }
 NVN(nvnWindowAcquireTexture, NVNwindowAcquireTextureResult, NVNwindow *w, NVNsync *s, int *idx) {
     win_t *o = (win_t *)w;
     *idx = o->ntex ? o->next++ % o->ntex : 0;
@@ -1509,17 +1532,27 @@ enum { STAT_N = 300 };
 static double g_st_int[STAT_N]; static int g_st_n; static uint64_t g_st_t0, g_st_skip0, g_st_wait0, g_st_nvn0;
 static int dcmp(const void *a, const void *b) { double x = *(const double *)a, y = *(const double *)b; return x < y ? -1 : x > y; }
 static uint64_t rt_busy_ns(void);
-static uint64_t g_st_rt0;
+static uint64_t g_st_rt0, g_st_sync0[4], g_st_drain0[2];
+static const char *sync_stat_text(void) {   // the game's blocked SyncWaits and drains since the line before (one thread writes it)
+    static char b[200];
+    uint64_t sn = atomic_load(&g_sync_n) - g_st_sync0[1], ln = atomic_load(&g_sync_lag_n) - g_st_sync0[3], dn = atomic_load(&g_drain_n) - g_st_drain0[0];
+    snprintf(b, sizeof b, "; SyncWait blocked %.2f ms a frame (%.1f waits a frame, %.1f submissions behind the newest); %.2f drains a frame (%.2f ms)",
+             (atomic_load(&g_sync_ns) - g_st_sync0[0]) / 1e6 / STAT_N, (double)sn / STAT_N, ln ? (double)(atomic_load(&g_sync_lag) - g_st_sync0[2]) / (double)ln : 0.0,
+             (double)dn / STAT_N, (atomic_load(&g_drain_ns) - g_st_drain0[1]) / 1e6 / STAT_N);
+    return b;
+}
 static void frame_stats(uint64_t n, double interval_ms, uint64_t now, double queued_ms) {
-    if (!g_st_n) { g_st_t0 = now; g_st_skip0 = g_vs_skipped; g_st_wait0 = atomic_load(&g_acq_wait_ns); g_st_nvn0 = atomic_load(&g_nvn_ns); g_st_rt0 = rt_busy_ns(); }
+    if (!g_st_n) { g_st_t0 = now; g_st_skip0 = g_vs_skipped; g_st_wait0 = atomic_load(&g_acq_wait_ns); g_st_nvn0 = atomic_load(&g_nvn_ns); g_st_rt0 = rt_busy_ns();
+                   g_st_sync0[0] = atomic_load(&g_sync_ns); g_st_sync0[1] = atomic_load(&g_sync_n); g_st_sync0[2] = atomic_load(&g_sync_lag); g_st_sync0[3] = atomic_load(&g_sync_lag_n);
+                   g_st_drain0[0] = atomic_load(&g_drain_n); g_st_drain0[1] = atomic_load(&g_drain_ns); }
     g_st_int[g_st_n] = interval_ms;
     if (++g_st_n < STAT_N) return;
     double secs = (now - g_st_t0) / 1e9, *v = g_st_int;
     qsort(v, STAT_N, sizeof *v, dcmp);
     LOG("[nvn] frame pacing up to frame %llu: %.2f presents/s; present interval p50 %.2f / p95 %.2f / p99 %.2f / max %.2f ms; vsyncs that showed no new frame %llu; "
-        "shown %.1f ms after the present; acquire waited %.1f ms in all; submit+present %.2f ms a frame%s", (unsigned long long)n, (STAT_N - 1) / (secs > 0 ? secs : 1), v[STAT_N / 2], v[STAT_N * 95 / 100],
+        "shown %.1f ms after the present; acquire waited %.1f ms in all; submit+present %.2f ms a frame%s%s", (unsigned long long)n, (STAT_N - 1) / (secs > 0 ? secs : 1), v[STAT_N / 2], v[STAT_N * 95 / 100],
         v[STAT_N * 99 / 100], v[STAT_N - 1], (unsigned long long)(g_vs_skipped - g_st_skip0), queued_ms, (atomic_load(&g_acq_wait_ns) - g_st_wait0) / 1e6,
-        (atomic_load(&g_nvn_ns) - g_st_nvn0) / 1e6 / STAT_N, rt_on() ? rt_stat_text((rt_busy_ns() - g_st_rt0) / 1e6 / STAT_N) : "");
+        (atomic_load(&g_nvn_ns) - g_st_nvn0) / 1e6 / STAT_N, rt_on() ? rt_stat_text((rt_busy_ns() - g_st_rt0) / 1e6 / STAT_N) : "", sync_stat_text());
     g_st_n = 0;
 }
 // The NVN calls of one frame (present to present): how many functions and calls, by name for frames 2 and 3 and every 3000th
@@ -1579,7 +1612,7 @@ NVN(nvnQueuePresentTexture, void, NVNqueue *q, NVNwindow *w, int idx) {
         gfx_leave();
     }
     atomic_fetch_add(&g_nvn_ns, now_ns() - t0);
-    unsigned skipped; uint64_t now = now_ns(), at = nxrt_nvn_display(now, present_itv(o), idx, &skipped);
+    int hz, itv = present_pace(o, &hz); unsigned skipped; uint64_t now = now_ns(), at = nxrt_nvn_display(now, hz, itv, idx, &skipped);
     g_vs_skipped += skipped;
     if (idx >= 0 && idx < 4) o->avail[idx] = at + present_period(o);
     if (g_last_present_ns) frame_stats(n, (now - g_last_present_ns) / 1e6, now, (at - now) / 1e6);

@@ -10,8 +10,9 @@
 extern "C" {
 #endif
 
-enum { MN_GLYPH = 0, MN_RECT = 1 };
-// One quad in window pixels: a glyph (u, v: its place in the font atlas, 0..1) or a rounded rectangle of radius r; colour sRGB, alpha in the top byte
+enum { MN_GLYPH = 0, MN_RECT = 1, MN_FADE = 2 };
+// One quad in window pixels: a glyph (u, v: its place in the font atlas, 0..1) or a rounded rectangle of radius r; colour sRGB, alpha in the top byte.
+// MN_FADE: a rounded rectangle in the fade's colours from left to right (only the alpha of rgba counts)
 typedef struct { float x0, y0, x1, y1, u0, v0, u1, v1, r; uint32_t rgba; int kind; } mn_quad;
 typedef struct { mn_quad *q; int n, cap; } mn_list;
 

@@ -1,0 +1,10 @@
+#version 450
+#extension GL_KHR_shader_subgroup_ballot : require
+// vkspv_sg32_emulate's test (t_vk_sg32.c): a subgroup operation the rewrite does not handle (NVN's translations have none), so the module is left as it is
+layout(local_size_x = 64) in;
+layout(std430, set = 0, binding = 0) readonly buffer In { uint x[]; } src;
+layout(std430, set = 0, binding = 1) buffer Out { uint o[]; } dst;
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    dst.o[i] = subgroupBroadcastFirst(src.x[i]);
+}

@@ -100,7 +100,8 @@ int main(void) {
     CHECK(fb == fa, "a hot page is left writable (%llu faults)", (unsigned long long)(fb - fa));
     vkm_frame_tick(9); submit_sync_all();
     CHECK(mirror_equals(mem, NP * PG), "a hot page is copied at every use");
-    vkm_frame_tick(240); submit_sync_all();   // cooling: protected again at its next copy
+    for (uint64_t f = 10; f <= 240 + NP; f++) vkm_frame_tick(f);   // cooling (every 240 frames, or a slice a frame with NXRT_VK_HOT_HIST): protected again at its next copy
+    submit_sync_all();
     nvn_dirty_stats(&fa, &pa); mem[40 * PG + 300] = 3; seen(mem); nvn_dirty_stats(&fb, &pb_);
     CHECK(fb - fa == 1, "a cooled page faults again (%llu)", (unsigned long long)(fb - fa));
     // vkm_use: only the range asked for
@@ -109,6 +110,16 @@ int main(void) {
     vks_begin(); VkBuffer bb; VkDeviceSize bo; CHECK(vkm_use((uint64_t)(uintptr_t)(mem + 100 * PG), 64, &bb, &bo) && bo == 100 * PG, "vkm_use resolves the pool"); vks_wait(vks_commit(), UINT64_MAX);
     vkm_stats(&b);
     CHECK(b.up_pages - a.up_pages == 1, "vkm_use copies the written page in its range only (%llu)", (unsigned long long)(b.up_pages - a.up_pages));
+    // the same range again in one submission: found current, not copied; written in between, copied (the memo never hides a write)
+    vks_begin();
+    vkm_stats(&a); vkm_use((uint64_t)(uintptr_t)(mem + 120 * PG), 4 * PG, &bb, &bo); vkm_use((uint64_t)(uintptr_t)(mem + 120 * PG), 4 * PG, &bb, &bo); vkm_stats(&b);
+    CHECK(b.up_pages == a.up_pages, "a range used twice in a submission is copied once at most (%llu)", (unsigned long long)(b.up_pages - a.up_pages));
+    mem[122 * PG + 5] = 0x77;
+    vkm_stats(&a); vkm_use((uint64_t)(uintptr_t)(mem + 120 * PG), 4 * PG, &bb, &bo); vkm_stats(&b);
+    if (!nvn_dirty_kernel())   // the kernel's tracking sees a submission's writes at its first look only (k_harvest)
+        CHECK(b.up_pages - a.up_pages == 1, "written between two uses in a submission: copied at the second (%llu)", (unsigned long long)(b.up_pages - a.up_pages));
+    vks_wait(vks_commit(), UINT64_MAX);
+    if (!nvn_dirty_kernel()) CHECK(mirror_equals(mem + 120 * PG, 4 * PG), "the device copy has the write made between two uses");
     // GPU writes reach guest memory when the submission completes: a copy, a fill, an inline update
     uint8_t expect[PG]; memcpy(expect, mem + 10 * PG, PG);
     vks_begin();

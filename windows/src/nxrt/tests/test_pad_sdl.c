@@ -74,6 +74,17 @@ static int split_main(void) {
     SDL_Event e = key(SDL_SCANCODE_J, 1); front_sdl_event(&e); T(!(rd(0).buttons & DM_BTN_A)); e = key(SDL_SCANCODE_J, 0); front_sdl_event(&e);   /* the keyboard is window 1's */
     memset(&e, 0, sizeof e); e.type = SDL_EVENT_MOUSE_BUTTON_DOWN; e.button.button = SDL_BUTTON_LEFT; front_sdl_event(&e); e.type = SDL_EVENT_MOUSE_BUTTON_UP; front_sdl_event(&e);
     T(!(rd(0).buttons & 0xffff));
+    /* the menu: only this window's controller opens it (Minus + Plus) and works it; the first controller's pair is window 1's */
+    SDL_SetJoystickVirtualButton(j1, SDL_GAMEPAD_BUTTON_BACK, true); pump(30); SDL_SetJoystickVirtualButton(j1, SDL_GAMEPAD_BUTTON_START, true); pump(50);
+    T(!menu_is_open());
+    SDL_SetJoystickVirtualButton(j1, SDL_GAMEPAD_BUTTON_BACK, false); SDL_SetJoystickVirtualButton(j1, SDL_GAMEPAD_BUTTON_START, false); pump(30);
+    SDL_SetJoystickVirtualButton(j2, SDL_GAMEPAD_BUTTON_BACK, true); pump(30); SDL_SetJoystickVirtualButton(j2, SDL_GAMEPAD_BUTTON_START, true); pump(50);
+    T(menu_is_open());
+    SDL_SetJoystickVirtualButton(j2, SDL_GAMEPAD_BUTTON_BACK, false); SDL_SetJoystickVirtualButton(j2, SDL_GAMEPAD_BUTTON_START, false); pump(30);
+    SDL_SetJoystickVirtualButton(j1, SDL_GAMEPAD_BUTTON_EAST, false); pump(30); SDL_SetJoystickVirtualButton(j1, SDL_GAMEPAD_BUTTON_EAST, true); pump(50);
+    T(menu_is_open());                                                               /* the other controller's B does not close it */
+    SDL_SetJoystickVirtualButton(j2, SDL_GAMEPAD_BUTTON_EAST, true); pump(50); T(!menu_is_open());   /* its own does */
+    SDL_SetJoystickVirtualButton(j2, SDL_GAMEPAD_BUTTON_EAST, false); pump(30); rd(0);
     memset(&e, 0, sizeof e); e.type = SDL_EVENT_WINDOW_FOCUS_LOST; front_sdl_event(&e);
     SDL_SetJoystickVirtualButton(j2, SDL_GAMEPAD_BUTTON_SOUTH, true); pump(50); T((rd(0).buttons & 0xffff) == DM_BTN_B);   /* out of focus: still playing */
     SDL_CloseJoystick(j2); SDL_DetachVirtualJoystick(p2); pump(100);

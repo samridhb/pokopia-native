@@ -304,7 +304,7 @@ static void draw_settings(mn_list *out, const mn_panel *p, const lay *L, int sel
     static const char *const label[S_APPLY] = {"How to play", "Host's address", "Room code", "Interact everywhere", "Story co-op"};
     for (int r = 0; r < S_APPLY; r++) {
         float y = set_row_y(p, L, r); int off = row_off(r), on = r == sel;
-        if (on) mn_rect(out, p->px + 24 * u, y + 4 * u, p->pw - 48 * u, L->row_h - 8 * u, (L->row_h - 8 * u) / 2, RGBA(255, 244, 196, 255));
+        if (on) mn_rect(out, p->px + 24 * u, y + 4 * u, p->pw - 48 * u, L->row_h - 8 * u, (L->row_h - 8 * u) / 2, C_HI);
         mn_text(out, label[r], L->xl, y + (L->row_h - fs) / 2, fs, off ? C_OFF : C_TEXT);
         mn_rect(out, L->x_val, y + 8 * u, L->val_w, L->row_h - 16 * u, (L->row_h - 16 * u) / 2, editing == r ? C_EDGE : on && !off ? C_SEL : C_PILL);
         switch (r) {
@@ -327,7 +327,7 @@ static void draw_settings(mn_list *out, const mn_panel *p, const lay *L, int sel
     if (!why[0]) { const char *w2; int k = lp_when(&G.run, w, ldn_open(), &w2); why = k == LP_SAME ? "" : w2; }
     char lines[2][200]; int nl = why[0] ? wrap(why, 21 * u, p->pw - 96 * u, lines, 2) : 0;
     float y0 = set_row_y(p, L, S_APPLY) + 18 * u + L->bh + 22 * u;
-    for (int k = 0; k < nl; k++) mn_text(out, lines[k], L->xl, y0 + k * 28 * u, mn_fit(lines[k], 21 * u, p->pw - 96 * u, u), G.note_bad ? RGBA(170, 30, 50, 255) : C_TITLE);
+    for (int k = 0; k < nl; k++) mn_text(out, lines[k], L->xl, y0 + k * 28 * u, mn_fit(lines[k], 21 * u, p->pw - 96 * u, u), G.note_bad ? C_BAD : C_TITLE);
     SDL_UnlockMutex(tmu());
 }
 void lp_draw(mn_list *out, const mn_panel *p, int sel) {

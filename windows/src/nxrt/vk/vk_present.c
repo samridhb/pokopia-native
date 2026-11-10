@@ -7,6 +7,7 @@
 #include "present_vert.h"
 #include "present_frag.h"
 #include <math.h>
+#include <time.h>
 #include <process.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -163,6 +164,12 @@ static void finish_item(uint64_t n, int dropped) {
 
 // Waits on a high-resolution waitable timer (Sleep follows the system timer, 15.6 ms unless something raised it), the last 0.3 ms by yielding
 static void sleep_until(uint64_t t) {
+#if defined(__linux__) && !defined(__ANDROID__)
+    for (uint64_t now; (now = now_ns()) < t;) {   // Linux sleeps to the 1 µs timer slack: nothing to yield through at the end
+        struct timespec d = {(time_t)((t - now) / 1000000000u), (long)((t - now) % 1000000000u)}; nanosleep(&d, NULL);
+    }
+    return;
+#endif
     static __thread HANDLE timer;
     if (!timer) timer = CreateWaitableTimerExW(NULL, NULL, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
     for (;;) {
@@ -228,8 +235,9 @@ static int present_one(const pq_item *it) {
     vkCmdBindPipeline(f->cb, VK_PIPELINE_BIND_POINT_GRAPHICS, g_p.pipe);
     vkCmdSetViewport(f->cb, 0, 1, &vp); vkCmdSetScissor(f->cb, 0, 1, &sc);
     vkCmdBindDescriptorSets(f->cb, VK_PIPELINE_BIND_POINT_GRAPHICS, g_p.pl, 0, 1, &f->ds, 0, NULL);
-    // F-5: a picture drawn larger is compared with the window by its own pixels; one larger than the window is averaged over each window pixel (mode 3)
-    float k = have && src.w && src.pw > src.w ? (float)src.pw / (float)src.w : 1.0f;
+    // F-5: a picture drawn larger or smaller is compared with the window by its own pixels (a 1280x720 one on a 1080p screen is upscaled sharp); one
+    // larger than the window is averaged over each window pixel (mode 3)
+    float k = have && src.w && src.pw != src.w ? (float)src.pw / (float)src.w : 1.0f;
     float mode = !have ? 1.0f : g_p.sharp && s / k > 1.01f ? 2.0f : k > 1.0f && s / k < 0.99f ? 3.0f : 0.0f;
     float pc[12] = {u0, v0, u1, v1, mode, (float)(atomic_load(&g_p.count) + 1), pw, ph, g_p.sharpness, 0, 0, 0};
     vkCmdPushConstants(f->cb, g_p.pl, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof pc, pc);

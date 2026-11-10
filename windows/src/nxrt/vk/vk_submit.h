@@ -21,6 +21,7 @@ void vks_flush(void);                         // hands every committed submissio
 int vks_wait(uint64_t fence, uint64_t timeout_ns);   // 1 when the GPU has completed fence and its CPU effects are applied (0 timeout_ns = poll)
 void vks_finish(void);                        // flush, then wait for all of it
 int vks_owner(void);                          // the slot this thread is recording into, -1 = none (staging ownership)
+uint64_t vks_sub_serial(void);                // the game submission this thread is recording (counts from 1), 0 = none or a one-shot
 int vks_recording(void);                      // an NVN submission is being recorded (its value is not assigned yet)
 void vks_stats(uint64_t *subs, uint64_t *queue_submits, uint64_t *empty, uint64_t *posted);
 

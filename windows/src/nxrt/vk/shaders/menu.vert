@@ -4,7 +4,7 @@ layout(location = 0) in vec4 rect;     // x0 y0 x1 y1
 layout(location = 1) in vec4 uvr;      // the glyph's place in the atlas: u0 v0 u1 v1
 layout(location = 2) in float radius;
 layout(location = 3) in vec4 color;
-layout(location = 4) in int kind;      // 0 glyph, 1 rectangle (front/menu.h)
+layout(location = 4) in int kind;      // 0 glyph, 1 rectangle, 2 rectangle in the fade (front/menu.h)
 layout(push_constant) uniform PC { vec2 size; } pc;   // the window in pixels
 layout(location = 0) out vec2 uv;
 layout(location = 1) out vec2 local;   // pixels from the rectangle's centre

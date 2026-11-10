@@ -3,9 +3,13 @@
 #include "menu.h"
 
 #define RGBA(r, g, b, a) ((uint32_t)(r) | (uint32_t)(g) << 8 | (uint32_t)(b) << 16 | (uint32_t)(a) << 24)
-static const uint32_t C_DIM = RGBA(24, 18, 48, 150), C_PANEL = RGBA(250, 248, 255, 250), C_EDGE = RGBA(200, 186, 246, 255), C_TITLE = RGBA(66, 54, 128, 255),
-                      C_TEXT = RGBA(64, 60, 96, 255), C_SOFT = RGBA(130, 124, 160, 255), C_PILL = RGBA(238, 233, 253, 255), C_SEL = RGBA(255, 222, 70, 255),
-                      C_SELTEXT = RGBA(70, 52, 0, 255), C_TAB = RGBA(229, 221, 251, 255), C_LIST = RGBA(255, 255, 255, 255), C_OFF = RGBA(170, 166, 190, 255);
+// The GitHub page's fade colours, as the builder and the launchers have them: the panel #FBF6FD with a #EAE2F2 edge, ink #1C1626 titles, body
+// #3A3346, muted #6A6277, pills in the tint, the highlighted row #FFEAF3. C_SEL is the selection: a rectangle in it is drawn as the fade
+// (#FF3D8E -> #D23CF0 -> #8A3FFC, left to right; menu.frag), with white text on it. C_CHOSEN is a chosen page while its row is not the selected one
+static const uint32_t C_DIM = RGBA(28, 22, 38, 150), C_PANEL = RGBA(251, 246, 253, 250), C_EDGE = RGBA(234, 226, 242, 255), C_TITLE = RGBA(28, 22, 38, 255),
+                      C_TEXT = RGBA(58, 51, 70, 255), C_SOFT = RGBA(106, 98, 119, 255), C_PILL = RGBA(237, 226, 255, 255), C_SEL = RGBA(210, 60, 240, 255),
+                      C_SELTEXT = RGBA(255, 255, 255, 255), C_TAB = RGBA(230, 217, 252, 255), C_LIST = RGBA(255, 255, 255, 255), C_OFF = RGBA(171, 165, 179, 255),
+                      C_HI = RGBA(255, 234, 243, 255), C_CHOSEN = RGBA(244, 206, 251, 255), C_BAD = RGBA(163, 45, 45, 255);
 enum { IN_UP = 1, IN_DOWN, IN_LEFT, IN_RIGHT, IN_OK, IN_BACK, IN_TABL, IN_TABR, IN_CLICK };
 
 // The panel in window pixels, the scale (1 at 1080 lines), the text size and the top of a tab's rows

@@ -33,17 +33,31 @@ static void refresh_size(void) {
     atomic_store(&g_w.fullscreen, (SDL_GetWindowFlags(g_w.win) & SDL_WINDOW_FULLSCREEN) != 0);
 }
 
-// Split screen (DM_SPLIT=1 or 2, docs/split-screen.md): the window takes its half of the main display's usable area, 16:9 and centred in it, without a frame;
-// window 2 never takes the focus (window 1 keeps the keyboard). DM_SPLIT_LAYOUT=stack puts the halves above each other
+// Split screen (DM_SPLIT=1 or 2, docs/split-screen.md): the window fills its half of the main display's usable area, without a frame; the picture keeps
+// its aspect inside (split.ps1 turns the wide view on for halves wider than 16:9). The halves are stacked; DM_SPLIT_LAYOUT=side puts them side by side.
+// Windows can still move a window after it is made (a restore, a display's scale): it is put back in its half whenever it is found elsewhere. The log
+// console is minimized here, not by the launcher: a minimized start minimizes the game's window too, which then comes back where it was made.
+// Window 2 is made without the focus (window 1 keeps the keyboard) and takes it when clicked, so that F1 opens its own menu; a click on window 1 gives it back
+static SDL_Rect g_split;   // the window's half (w 0: none)
+static int g_split_fixes;
 static int split_window(void) { const char *e = getenv("DM_SPLIT"); int k = e ? atoi(e) : 0; return k == 1 || k == 2 ? k : 0; }
-static void split_place(int k) {
+static void split_half(int k) {
     SDL_Rect r; if (!SDL_GetDisplayUsableBounds(SDL_GetPrimaryDisplay(), &r)) { VKLOG("split screen: no display bounds (%s)", SDL_GetError()); return; }
-    const char *l = getenv("DM_SPLIT_LAYOUT"); int stack = l && !strcmp(l, "stack");
-    int cw = stack ? r.w : r.w / 2, ch = stack ? r.h / 2 : r.h, w = cw, h = cw * 9 / 16;
-    if (h > ch) { h = ch; w = ch * 16 / 9; }
-    int x = r.x + (stack ? 0 : (k - 1) * cw) + (cw - w) / 2, y = r.y + (stack ? (k - 1) * ch : 0) + (ch - h) / 2;
-    SDL_SetWindowSize(g_w.win, w, h); SDL_SetWindowPosition(g_w.win, x, y); SDL_SyncWindow(g_w.win);
-    VKLOG("split screen: window %d at %d,%d, %dx%d (%s)", k, x, y, w, h, stack ? "top and bottom" : "side by side");
+    const char *l = getenv("DM_SPLIT_LAYOUT"); int side = l && !strcmp(l, "side");
+    if (side) { int w1 = r.w / 2; g_split = (SDL_Rect){ r.x + (k == 1 ? 0 : w1), r.y, k == 1 ? w1 : r.w - w1, r.h }; }
+    else { int h1 = r.h / 2; g_split = (SDL_Rect){ r.x, r.y + (k == 1 ? 0 : h1), r.w, k == 1 ? h1 : r.h - h1 }; }
+    VKLOG("split screen: window %d's half is %d,%d, %dx%d (%s)", k, g_split.x, g_split.y, g_split.w, g_split.h, side ? "side by side" : "top and bottom");
+}
+static void split_place(int k, const char *why) {
+    if (!g_split.w || (SDL_GetWindowFlags(g_w.win) & SDL_WINDOW_MINIMIZED)) return;
+    int x, y, w, h; SDL_GetWindowPosition(g_w.win, &x, &y); SDL_GetWindowSize(g_w.win, &w, &h);
+    if (x == g_split.x && y == g_split.y && w == g_split.w && h == g_split.h) return;
+    if (g_split_fixes++ == 20) VKLOG("split screen: window %d keeps being moved away from its half; it is left where it is", k);
+    if (g_split_fixes > 20) return;
+    if (SDL_GetWindowFlags(g_w.win) & (SDL_WINDOW_MAXIMIZED | SDL_WINDOW_FULLSCREEN)) { SDL_SetWindowFullscreen(g_w.win, false); SDL_RestoreWindow(g_w.win); }
+    SDL_SetWindowSize(g_w.win, g_split.w, g_split.h); SDL_SetWindowPosition(g_w.win, g_split.x, g_split.y); SDL_SyncWindow(g_w.win);
+    int nx, ny, nw, nh; SDL_GetWindowPosition(g_w.win, &nx, &ny); SDL_GetWindowSize(g_w.win, &nw, &nh);
+    VKLOG("split screen: window %d put in its half (%s): it was at %d,%d, %dx%d, now %d,%d, %dx%d", k, why, x, y, w, h, nx, ny, nw, nh);
 }
 
 static unsigned __stdcall window_main(void *arg) {
@@ -54,12 +68,18 @@ static unsigned __stdcall window_main(void *arg) {
     if (!vok) { VKRED("SDL_Init(VIDEO) failed: %s", SDL_GetError()); g_w.fail = 1; SetEvent(g_w.ready); return 0; }
     if (!SDL_Vulkan_LoadLibrary(NULL)) { VKRED("SDL cannot load the Vulkan loader: %s", SDL_GetError()); g_w.fail = 1; SetEvent(g_w.ready); return 0; }
     int split = g_w.hidden ? 0 : split_window();
+    if (split) {
+#ifdef _WIN32
+        HWND con = GetConsoleWindow(); if (con) ShowWindow(con, SW_SHOWMINNOACTIVE);
+#endif
+        split_half(split);
+    }
     SDL_WindowFlags fl = SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | (g_w.hidden ? SDL_WINDOW_HIDDEN : 0) |
                          (split ? SDL_WINDOW_BORDERLESS : 0) | (split == 2 ? SDL_WINDOW_NOT_FOCUSABLE : 0);
-    g_w.win = SDL_CreateWindow(g_w.title, g_w.req_w, g_w.req_h, fl);
+    g_w.win = SDL_CreateWindow(g_w.title, g_split.w ? g_split.w : g_w.req_w, g_split.w ? g_split.h : g_w.req_h, fl);
     if (!g_w.win) { VKRED("SDL_CreateWindow failed: %s", SDL_GetError()); g_w.fail = 1; SetEvent(g_w.ready); return 0; }
     SDL_SetWindowMinimumSize(g_w.win, 320, 180);
-    if (split) split_place(split);
+    if (split) split_place(split, "made");
     g_w.ev_req = SDL_RegisterEvents(1);
     if (!g_w.hidden) {   // the game's window (the tests' hidden ones take no input)
         front_sdl_hints();
@@ -77,10 +97,19 @@ static unsigned __stdcall window_main(void *arg) {
         do {
             if (g_w.front) front_sdl_event(&e);
             switch (e.type) {
-            case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED: case SDL_EVENT_WINDOW_RESIZED: case SDL_EVENT_WINDOW_DISPLAY_CHANGED: refresh_size(); break;
+            case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED: case SDL_EVENT_WINDOW_RESIZED: case SDL_EVENT_WINDOW_DISPLAY_CHANGED: case SDL_EVENT_WINDOW_MOVED:
+                if (split) split_place(split, e.type == SDL_EVENT_WINDOW_MOVED ? "moved" : "resized");
+                refresh_size(); break;
             case SDL_EVENT_WINDOW_MINIMIZED: atomic_store(&g_w.minimized, 1); break;   // covered (occluded) windows keep presenting: DWM still composes them
             case SDL_EVENT_WINDOW_RESTORED: case SDL_EVENT_WINDOW_EXPOSED: case SDL_EVENT_WINDOW_SHOWN: case SDL_EVENT_WINDOW_MAXIMIZED:
+                if (split && e.type != SDL_EVENT_WINDOW_EXPOSED) split_place(split, "shown");
                 atomic_store(&g_w.minimized, 0); refresh_size(); break;
+            case SDL_EVENT_MOUSE_BUTTON_DOWN:   // split screen: a click on window 2 gives it the keyboard (its F1 menu); window 1 takes it back the same way
+                if (split == 2 && !(SDL_GetWindowFlags(g_w.win) & SDL_WINDOW_INPUT_FOCUS)) {
+                    SDL_SetWindowFocusable(g_w.win, true); SDL_RaiseWindow(g_w.win);
+                    VKLOG("split screen: window 2 takes the keyboard (clicked): F1 opens its menu; a click on window 1 gives the keyboard back");
+                }
+                break;
             case SDL_EVENT_KEY_DOWN:
                 if (!split && ((e.key.key == SDLK_RETURN && (e.key.mod & SDL_KMOD_ALT)) || e.key.key == SDLK_F11))   // split screen: the halves stay put
                     SDL_SetWindowFullscreen(g_w.win, !(SDL_GetWindowFlags(g_w.win) & SDL_WINDOW_FULLSCREEN));

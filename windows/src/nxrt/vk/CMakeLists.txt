@@ -29,7 +29,7 @@ message(STATUS "nxrt: Vulkan backend with SDL3 ${SDL3_VERSION} (${NXRT_SDL3_DIR}
 
 # The backend's own shaders, compiled to SPIR-V headers
 set(_spv)
-foreach(sh present.vert present.frag menu.vert menu.frag test_fill.comp test_pervertex.vert test_pervertex_cull.vert test_bind.frag clear.vert clear_f.frag clear_u.frag clear_i.frag test_dual.frag test_tri.vert test_ballot.comp test_ballot_used.comp test_ballot_slot.comp test_ballot_slot4.comp test_ballot_rank.comp test_guard.comp test_guard_u.comp test_guard_v.comp test_guard_b.comp quad_args.comp aa.vert aa_fxaa.frag aa_edge.frag aa_weight.frag aa_blend.frag)
+foreach(sh present.vert present.frag menu.vert menu.frag test_fill.comp test_pervertex.vert test_pervertex_cull.vert test_bind.frag clear.vert clear_f.frag clear_u.frag clear_i.frag test_dual.frag test_tri.vert test_ballot.comp test_ballot_used.comp test_ballot_slot.comp test_ballot_slot4.comp test_ballot_rank.comp test_guard.comp test_guard_u.comp test_guard_v.comp test_guard_b.comp quad_args.comp aa.vert aa_fxaa.frag aa_edge.frag aa_weight.frag aa_blend.frag test_sg32.comp test_sg32_vote.comp test_sg32_bcast.comp)
   string(REPLACE "." "_" var ${sh})
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${var}.h
     COMMAND ${NXRT_GLSLANG} -V --target-env vulkan1.3 --vn ${var}_spv -o ${CMAKE_CURRENT_BINARY_DIR}/${var}.h ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${sh}
@@ -78,7 +78,7 @@ file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/../front/third_party/SDL_GameControllerDB
 
 # Tests (docs/m5-vulkan.md §6): skipped (77) without a Vulkan GPU or without the data they need
 set(NXRT_VK_TEST_INC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR} "${_vk_inc}" "${NXRT_SDL3_DIR}/include" ${CMAKE_CURRENT_SOURCE_DIR}/../gfx ${CMAKE_SOURCE_DIR}/src/s2tex)
-foreach(t device dirty tex astc pcache replay windows ballot guard quads scale wide aa)
+foreach(t device dirty tex astc pcache replay windows ballot guard quads scale wide aa sg32)
   nxrt_executable(nxrt-tests-vk-${t} tests/t_vk_${t}.c)
   target_include_directories(nxrt-tests-vk-${t} PRIVATE ${NXRT_VK_TEST_INC})
   target_compile_options(nxrt-tests-vk-${t} PRIVATE -fms-extensions -Wno-sign-compare -Wno-missing-field-initializers -Wno-missing-braces)
@@ -100,6 +100,10 @@ set_tests_properties(nxrt.vk_guard_corpus_nv PROPERTIES SKIP_RETURN_CODE 77 ENVI
   "NXRT_LOG_DIR=${CMAKE_BINARY_DIR}/nxrt-test-logs;NXRT_VK_CACHE_DIR=${CMAKE_BINARY_DIR}/vk-test-cache;NXRT_TEST_CORPUS=${NXRT_TEST_CORPUS};NXRT_VK_LOOP_GUARD=1;NXRT_VK_BALLOT_FIX=1")
 set_tests_properties(nxrt.vk_guard_corpus_other PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT
   "NXRT_LOG_DIR=${CMAKE_BINARY_DIR}/nxrt-test-logs;NXRT_VK_CACHE_DIR=${CMAKE_BINARY_DIR}/vk-test-cache;NXRT_TEST_CORPUS=${NXRT_TEST_CORPUS};NXRT_VK_LOOP_GUARD=cap;NXRT_VK_BALLOT_FIX=0")
+# The 32-lane rewrite (#40) on every module of the same caches that uses subgroups: rewritten, made with validation on, the compute ones into pipelines
+add_test(NAME nxrt.vk_sg32_corpus COMMAND nxrt-tests-vk-sg32)
+set_tests_properties(nxrt.vk_sg32_corpus PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT
+  "NXRT_LOG_DIR=${CMAKE_BINARY_DIR}/nxrt-test-logs;NXRT_VK_CACHE_DIR=${CMAKE_BINARY_DIR}/vk-test-cache;NXRT_TEST_CORPUS=${NXRT_TEST_CORPUS}")
 # The pool windows once more, side by side (no sparse aliasing): a range across a window edge is refused
 add_test(NAME nxrt.vk_windows_side COMMAND nxrt-tests-vk-windows)
 set_tests_properties(nxrt.vk_windows_side PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT "NXRT_VK_NO_ALIAS=1;NXRT_LOG_DIR=${CMAKE_BINARY_DIR}/nxrt-test-logs;NXRT_VK_CACHE_DIR=${CMAKE_BINARY_DIR}/vk-test-cache")

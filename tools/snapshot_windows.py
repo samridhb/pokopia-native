@@ -29,6 +29,7 @@ UPSTREAM_REF = {'src/s2tex/tests/ref/tex/nvn_deswizzle.c': 'dm/gfx/tex/nvn_deswi
                 'src/s2tex/tests/ref/nvn/nvn_tex.c': 'dm/gfx/nvn/nvn_tex.c', 'src/s2tex/tests/ref/nvn/nvn_tex.h': 'dm/gfx/nvn/nvn_tex.h'}
 TEXT = {'.c', '.cpp', '.h', '.hpp', '.py', '.md', '.txt', '.cmd', '.ps1', '.tsv', '.tbl', '.inc', '.S', '.m', '.metal', '.sh', '.diff', '.frag', '.vert',
         '.comp', '.json', '.gitignore', '.cmake', '.dynlist', ''}
+OWN_ART = {'src/launcher/pokopia.ico': b'\0\0\1\0'}   # the project's own icon (the installer's icon/), the only binary: checked by its header, scanned as bytes
 
 
 def main():
@@ -65,6 +66,9 @@ def main():
             for pat in NEVER:
                 for m in pat.finditer(t): problems.append(f'{n}:{t.count(chr(10), 0, m.start()) + 1}: {m.group(0)}')
             data = t.encode('utf-8')
+        elif n in OWN_ART and data.startswith(OWN_ART[n]):
+            for pat in NEVER:
+                if re.search(pat.pattern.encode(), data, re.I): problems.append(f'{n}: matches a never-publish pattern')
         else: problems.append(f'{n}: not a known text type (binary files are not published from this tree)')
         dst.write_bytes(data)
     ref_ok = []

@@ -58,15 +58,15 @@ static void key_from(const pool_t *pool, int64_t off, const uint8_t *mem, const 
 }
 static void key_of(const tex_t *t, int cls, skey *k) { key_from(t->pool, t->off, t->mem, &t->d, t->has_layout, cls, k); }
 
-// ---------- F-5: render targets drawn larger ----------
-// NXRT_VK_SCALE (the launcher's Resolution): the factor. Which images: GPU content (what the game renders, never what it reads from guest memory), 2D or 2D arrays, not
+// ---------- F-5: render targets drawn larger (or smaller: a Steam Deck's 1280x720 is x0.667) ----------
+// NXRT_VK_SCALE (the launcher's Resolution): the factor, 0.5 to 4. Which images: GPU content (what the game renders, never what it reads from guest memory), 2D or 2D arrays, not
 // block-compressed, an attachment, from 64 x 64 up to the docked screen's 1920 x 1080 and not square (shadow maps and their atlases, LUTs and cube faces stay
 // as they are, and so do the 2x1 exposure and the small probe targets), not linear (the CPU reads those in place), not one whose first content the game put in
 // guest memory (a lookup table: init_fill), within the device's limits. An image taken back to the game's size (vkt_unscale) stays so for the rest of the run
 // (g_noscale), as Ryujinx's resolution scaling blacklists a texture. NULL: scaled, else why not
 static float g_scale = 1.0f; static _Atomic uint32_t g_scale_req;   // the factor; one the in-game menu asked for (float bits, 0 = none)
 float vkt_scale(void) { return g_scale; }
-static float scale_clamp(float s) { return s > 1.01f && s <= 4.0f ? s : 1.0f; }
+static float scale_clamp(float s) { return (s >= 0.5f && s < 0.99f) || (s > 1.01f && s <= 4.0f) ? s : 1.0f; }
 static int init_fill_src(const tex_t *t, const vkf_info *fi);
 static const char *scale_wanted(const tex_t *t, const vkf_info *fi, int cls, VkImageUsageFlags u) {
     if (cls != VKT_GPU) return "its content comes from guest memory";
@@ -442,9 +442,15 @@ static int pages_same(const vkt_image *im, const tex_t *t) {
 }
 
 // Uploads a storage-backed image when its pages were written since its last upload (nxnative's order: stamp, protect, then read). Caller holds g_lk
+// Checked once per game submission: its uploads all run before its draws, so a second check within it could only upload over the first (on every bind it
+// was a scan of each page's write generation, 1,000+ for a large atlas)
 static void refresh(vkt_image *im, const tex_t *t) {
+    static int on = -1;   // NXRT_VK_TEX_ONCE=0: checked at every bind again, as before
+    if (on < 0) { const char *e = getenv("NXRT_VK_TEX_ONCE"); on = !(e && *e == '0'); if (!on) VKLOG("NXRT_VK_TEX_ONCE=0: textures from guest memory are checked at every bind"); }
+    uint64_t sub = on ? vks_sub_serial() : 0;
+    if (sub && im->checked_sub == sub && im->content) return;
     if (!im->span) im->span = nvn_dirty_span(t->mem, (size_t)t->L.size);
-    if (im->content && im->span && !nvn_dirty_since_span(im->span, t->mem, (size_t)t->L.size, im->stamp)) return;
+    if (im->content && im->span && !nvn_dirty_since_span(im->span, t->mem, (size_t)t->L.size, im->stamp)) { im->checked_sub = sub; return; }
     int once; VkCommandBuffer cb = cb_get(&once);
     if (!cb) return;
     uint64_t st = nvn_dirty_now();
@@ -452,10 +458,10 @@ static void refresh(vkt_image *im, const tex_t *t) {
     int first = !im->content, hashing = hash_on() && im->span && t->mem;
     if (hashing && !first) {   // the pages were written: with the same bytes, the image stays
         uint64_t th = now_ns(); int same = pages_same(im, t); atomic_fetch_add(&s_hash_ns, now_ns() - th);
-        if (same) { im->stamp = st; atomic_fetch_add(&s_same, 1); atomic_fetch_add(&s_same_bytes, t->L.size); cb_put(cb, once); return; }
+        if (same) { im->stamp = st; im->checked_sub = sub; atomic_fetch_add(&s_same, 1); atomic_fetch_add(&s_same_bytes, t->L.size); cb_put(cb, once); return; }
     }
     if (hashing) { uint64_t th = now_ns(); hash_pages(im, t); atomic_fetch_add(&s_hash_ns, now_ns() - th); }
-    if (upload(im, t, cb) >= 0) { im->stamp = st; if (first) atomic_fetch_add(&s_uploads, 1); else atomic_fetch_add(&s_reuploads, 1); }
+    if (upload(im, t, cb) >= 0) { im->stamp = st; im->checked_sub = sub; if (first) atomic_fetch_add(&s_uploads, 1); else atomic_fetch_add(&s_reuploads, 1); }
     else im->npg = 0;   // not uploaded: the hashes describe nothing
     cb_put(cb, once);
 }

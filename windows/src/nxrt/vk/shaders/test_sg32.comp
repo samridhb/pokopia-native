@@ -1,0 +1,20 @@
+#version 450
+#extension GL_KHR_shader_subgroup_ballot : require
+#extension GL_KHR_shader_subgroup_vote : require
+#extension GL_KHR_shader_subgroup_shuffle : require
+// vkspv_sg32_emulate's test (t_vk_sg32.c): what NVN's translated shaders use of subgroups. Per lane its index and a shuffle within its warp; then, the lanes
+// whose value is 7 having left, a ballot, the lane's rank under the LtMask, Any and All. Every result is as 32-lane warps give it
+layout(local_size_x = 64) in;
+layout(std430, set = 0, binding = 0) readonly buffer In { uint x[]; } src;
+layout(std430, set = 0, binding = 1) buffer Out { uint o[]; } dst;
+void main() {
+    uint i = gl_GlobalInvocationID.x, x = src.x[i], lane = gl_SubgroupInvocationID;
+    dst.o[i * 6u] = lane;
+    dst.o[i * 6u + 1u] = subgroupShuffle(x * 3u + lane, (lane + x) & 31u);
+    if (x == 7u) return;
+    uvec4 b = subgroupBallot((x & 1u) != 0u);
+    dst.o[i * 6u + 2u] = b.x;
+    dst.o[i * 6u + 3u] = bitCount(gl_SubgroupLtMask.x & b.x);
+    dst.o[i * 6u + 4u] = subgroupAny(x > 5u) ? 1u : 0u;
+    dst.o[i * 6u + 5u] = subgroupAll(x < 6u) ? 1u : 0u;
+}

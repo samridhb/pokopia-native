@@ -4,6 +4,7 @@
 #include "menu_int.h"
 #include "menu_font.h"
 #include "front_map.h"
+#include "front_sdl.h"
 #include "dm.h"
 #include <math.h>
 #include <stdio.h>
@@ -13,6 +14,8 @@
 // What the menu changes (vk_tex.c, vk_window.c, vk_present.c, gfx_vk.c, front_sdl.c) and reads (hle_oe.c); DM_CTL's "menu" lines (hle_hid.c)
 void vkt_request_scale(float s);
 float vkt_scale(void);
+uint64_t vkr_gpu_ns_total(void);     // vk_replay.c
+uint64_t nvn_replay_busy_ns(void);   // hle_nvn.c
 void vkw_request_fullscreen(int on);
 void vkw_request_size(int w, int h);
 void vkw_desktop_size(int *w, int *h);
@@ -32,11 +35,14 @@ void menu_font_atlas(const uint8_t **px, int *w, int *h) { *px = mf_atlas; *w = 
 
 // ---------- Settings: what the launcher's Display and Controls tabs keep (display.json, controls.json) ----------
 // Every size shown is the size the game really draws its picture at, in the mode that is running (its own: 1920x1080 docked, 1280x720 handheld)
-static const int res_list_h[4] = {720, 1080, 1440, 2160};   // the Resolution list after Default: those at least the game's own height (16:9)
+static const int res_list_h[5] = {720, 900, 1080, 1440, 2160};   // the Resolution list after Default (16:9): below the game's own height too
+enum { RES_MIN_H = 720 };   // the smallest size drawn (a Steam Deck's screen: 1280x720 of its 1280x800)
 static const char *const win_sizes[5] = {"1280x720", "1600x900", "1920x1080", "2560x1440", "3840x2160"};
+enum { G_FPS_N = 5 };
+static const int g_fps_list[G_FPS_N] = {60, 50, 45, 40, 30};   // the Frame rate row (gfx_vk.c fps_cap takes the same)
 typedef struct {
     char res[24];                                                         // "default" or "<w>x<h>" as saved (an older size keeps its string: it means that size)
-    int fullscreen, win, console, sharp, sharpness, fps30, vsync, counter, wide, aa;   // indexes and switches; sharpness 0..10; counter 0 off, 1 corner, 2 detailed; aa 0 off, 1 FXAA, 2 SMAA
+    int fullscreen, win, console, sharp, sharpness, fps, vsync, counter, wide, aa;   // indexes and switches (fps: g_fps_list); sharpness 0..10; counter 0 off, 1 corner, 2 detailed; aa 0 off, 1 FXAA, 2 SMAA
 } settings;
 static struct {
     SDL_Mutex *mu; int ready;
@@ -48,6 +54,7 @@ static struct {
     int pad_back, pad_start; float stick_y, stick_x; uint64_t stick_t;
     char dir[1024], status[160]; uint64_t status_t;
     uint64_t fps_t0, fps_last; int fps_n; float fps, ms;   // the FPS counter: presents counted over half a second
+    uint64_t gpu0, rep0; float gpu_ms, rep_ms;             // Detailed: the GPU and replay totals at the last update, and their time a frame
 } M = {.dd = -1};
 
 static const char *settings_dir(void) {
@@ -68,8 +75,8 @@ static FILE *settings_file(const char *name, const char *mode) {
     return fopen(p, mode);
 }
 
-// The height a choice draws at: at least the game's own (a smaller saved size draws the game's own); "default" the monitor's height, at most 2160; a
-// saved size at most 3240 (the 5760x3240 the first menu offered). The factor F-5 draws at is that height over the game's own. Pokopia's own picture is
+// The height a choice draws at: a saved size from 720 (a smaller one draws 720) to 3240 (the 5760x3240 the first menu offered); "default" the monitor's
+// height, from the game's own 1080 to 2160. The factor F-5 draws at is that height over the game's own. Pokopia's own picture is
 // 1920x1080 docked and handheld alike (WindowCrop 1920x1080 and 1920x1080 targets with DM_OPMODE=0 too, measured 2026-11-06)
 static int base_h(void) { return 1080; }
 // "default" keeps to 2560x1440 on a GPU with 4 GB of its own memory or less (a 4 GB laptop card on a 4K monitor would run out at 3840x2160); the menu shows
@@ -88,16 +95,16 @@ static int monitor_h(void) {
 static int choice_h(const char *choice) {
     int b = base_h(), w, h;
     if (!choice || !strcmp(choice, "default")) return monitor_h();
-    if (sscanf(choice, "%dx%d", &w, &h) == 2) return h < b ? b : h > 3240 ? 3240 : h;
+    if (sscanf(choice, "%dx%d", &w, &h) == 2) return h < RES_MIN_H ? RES_MIN_H : h > 3240 ? 3240 : h;
     return b;
 }
 float menu_resolution_scale(const char *choice) {   // NXRT_VK_RESOLUTION / display.json "resolution": "default" or "<w>x<h>"; a bare number is a factor (tests)
-    if (choice && *choice && strcmp(choice, "default") && !strchr(choice, 'x')) { float f = (float)atof(choice); return f >= 1 && f <= 4 ? f : 1.0f; }
+    if (choice && *choice && strcmp(choice, "default") && !strchr(choice, 'x')) { float f = (float)atof(choice); return f >= 0.5f && f <= 4 ? f : 1.0f; }
     return (float)choice_h(choice) / base_h();
 }
-// The Resolution list in the running mode: Default, then the game's own size and up (docked 1920x1080, 2560x1440, 3840x2160; handheld 1280x720 first)
-static int res_count(void) { int n = 1; for (int i = 0; i < 4; i++) n += res_list_h[i] >= base_h(); return n; }
-static int res_entry_h(int j) { if (!j) return 0; for (int i = 0; i < 4; i++) if (res_list_h[i] >= base_h() && !--j) return res_list_h[i]; return base_h(); }
+// The Resolution list: Default, then 1280x720, 1600x900, the game's own 1920x1080, 2560x1440, 3840x2160
+static int res_count(void) { int n = 1; for (int i = 0; i < 5; i++) n += res_list_h[i] >= RES_MIN_H; return n; }
+static int res_entry_h(int j) { if (!j) return 0; for (int i = 0; i < 5; i++) if (res_list_h[i] >= RES_MIN_H && !--j) return res_list_h[i]; return base_h(); }
 static void res_entry(int j, char *out, size_t n) { int h = res_entry_h(j); if (!h) snprintf(out, n, "default"); else snprintf(out, n, "%dx%d", h * 16 / 9, h); }
 static int res_place(const char *choice) {   // the entry a saved choice is, else the nearest by height (an older size not in the list)
     if (!strcmp(choice, "default")) return 0;
@@ -108,7 +115,7 @@ static int res_place(const char *choice) {   // the entry a saved choice is, els
 static void res_text(const char *choice, char *out, size_t n) {   // the size it draws at
     int h = choice_h(choice), w = h * 16 / 9;
     if (!strcmp(choice, "default")) snprintf(out, n, "Default: your monitor (%dx%d)", w, h);
-    else snprintf(out, n, "%dx%d%s", w, h, h == base_h() ? " (the game's own)" : "");
+    else snprintf(out, n, "%dx%d%s", w, h, h == base_h() ? " (the game's own)" : h == RES_MIN_H ? " (a Steam Deck's screen)" : "");
 }
 
 static void save_display(void) {
@@ -117,7 +124,7 @@ static void save_display(void) {
     const settings *s = &M.s;
     fprintf(f, "{\n    \"console\":  %d,\n    \"resolution\":  \"%s\",\n    \"fullscreen\":  %s,\n    \"window\":  \"%s\",\n    \"upscale\":  \"%s\",\n    \"sharpness\":  %d,\n"
                "    \"fps\":  %d,\n    \"vsync\":  %s,\n    \"fps_counter\":  \"%s\",\n    \"wide_view\":  %s,\n    \"antialiasing\":  \"%s\"\n}\n", s->console, s->res, s->fullscreen ? "true" : "false",
-            win_sizes[s->win], s->sharp ? "sharp" : "standard", s->sharpness, s->fps30 ? 30 : 60, s->vsync ? "true" : "false", cnt[s->counter], s->wide ? "true" : "false", aa[s->aa]);
+            win_sizes[s->win], s->sharp ? "sharp" : "standard", s->sharpness, g_fps_list[s->fps], s->vsync ? "true" : "false", cnt[s->counter], s->wide ? "true" : "false", aa[s->aa]);
     fclose(f);
 }
 static void status(const char *t) { snprintf(M.status, sizeof M.status, "%s", t); M.status_t = SDL_GetTicksNS(); }
@@ -134,15 +141,15 @@ static const char *const g_hint[G_N] = {
     "How the picture is stretched when the window is larger than it: Sharp, or Standard (softer).",
     "How strong Sharp upscaling is.",
     "Smooths the jagged edges of the 3D picture; the HUD and text stay sharp. SMAA keeps more detail, FXAA is a little softer.",
-    "60, or 30 to spare the computer (the game keeps its speed).",
+    "60, or lower to spare the computer (the game keeps its speed). 40 is smooth on 120 Hz screens; 45 and 50 on screens with G-Sync or FreeSync.",
     "On: no tearing. Off: a little less delay, may tear.",
-    "Shows frames per second in a corner. Detailed adds frame time and the resolution.",
+    "Shows frames per second in a corner. Detailed adds frame time, the GPU's and the replay's time a frame, and the resolution.",
     "Experimental. On a screen wider than 16:9, the game's view fills it instead of bars; menus and the HUD stay in the middle. Changes at the next start."};
-static int g_count(int row) { return row == G_RES ? res_count() : row == G_WIN ? 5 : row == G_SHARP ? 11 : row == G_COUNTER || row == G_AA ? 3 : 2; }
+static int g_count(int row) { return row == G_RES ? res_count() : row == G_WIN ? 5 : row == G_SHARP ? 11 : row == G_COUNTER || row == G_AA ? 3 : row == G_FPS ? G_FPS_N : 2; }
 static int g_value(int row) {
     const settings *s = &M.s;
     switch (row) { case G_RES: return res_place(s->res); case G_DISPLAY: return s->fullscreen; case G_WIN: return s->win; case G_CONSOLE: return !s->console;
-                   case G_UPSCALE: return !s->sharp; case G_SHARP: return s->sharpness; case G_FPS: return s->fps30; case G_VSYNC: return !s->vsync;
+                   case G_UPSCALE: return !s->sharp; case G_SHARP: return s->sharpness; case G_FPS: return s->fps; case G_VSYNC: return !s->vsync;
                    case G_WIDE: return s->wide; case G_AA: return s->aa; default: return s->counter; }
 }
 static void g_text(int row, int v, char *out, size_t n) {
@@ -153,7 +160,7 @@ static void g_text(int row, int v, char *out, size_t n) {
     case G_CONSOLE: snprintf(out, n, "%s%s", v ? "Handheld" : "Docked (TV)", !v != (dm_opmode() != 0) ? " from the next start" : ""); break;
     case G_UPSCALE: snprintf(out, n, v ? "Standard (softer)" : "Sharp"); break;
     case G_SHARP: snprintf(out, n, "%d", v); break;
-    case G_FPS: snprintf(out, n, v ? "30 fps" : "60 fps"); break;
+    case G_FPS: snprintf(out, n, "%d fps", g_fps_list[v >= 0 && v < G_FPS_N ? v : 0]); break;
     case G_VSYNC: snprintf(out, n, v ? "Off" : "On"); break;
     case G_WIDE: snprintf(out, n, "%s%s", v ? "On (experimental)" : "Off", v != M.wide_now ? " from the next start" : ""); break;
     case G_AA: snprintf(out, n, v == 2 ? "SMAA" : v ? "FXAA" : "Off"); break;
@@ -170,7 +177,7 @@ static void g_set(int row, int v) {
     case G_CONSOLE: s->console = !v; break;   // at the next start: switched live, player 1's controller would become the handheld one under the game
     case G_UPSCALE: s->sharp = !v; vkp_set_upscale(s->sharp, s->sharpness / 10.0f); break;
     case G_SHARP: s->sharpness = v; vkp_set_upscale(s->sharp, s->sharpness / 10.0f); break;
-    case G_FPS: s->fps30 = v; vk_set_fps_target(v ? 30 : 60); break;
+    case G_FPS: s->fps = v >= 0 && v < G_FPS_N ? v : 0; vk_set_fps_target(g_fps_list[s->fps]); break;
     case G_VSYNC: s->vsync = !v; vkp_set_mode(s->vsync ? 0 : 1); break;   // VKP_FIFO / VKP_MAILBOX
     case G_WIDE: s->wide = v; break;   // at the next start: the camera hook is set up as the game starts (host/rt.c)
     case G_AA: s->aa = v; vkaa_set_mode(v); break;   // from the next frame (vk_aa.c)
@@ -207,7 +214,7 @@ void menu_init(void) {
     s->console = dm_opmode() != 0;
     e = getenv("NXRT_VK_UPSCALE"); s->sharp = !(e && !strcmp(e, "standard"));
     e = getenv("NXRT_VK_SHARPNESS"); s->sharpness = e && *e ? (int)(atof(e) * 10 + 0.5) : 5; if (s->sharpness < 0 || s->sharpness > 10) s->sharpness = 5;
-    e = getenv("DM_FPS"); s->fps30 = e && atoi(e) == 30;
+    e = getenv("DM_FPS"); s->fps = 0; for (int k = 0; e && k < G_FPS_N; k++) if (atoi(e) == g_fps_list[k]) s->fps = k;
     e = getenv("NXRT_VK_PRESENT"); s->vsync = !(e && (!strcmp(e, "mailbox") || !strcmp(e, "immediate")));
     e = getenv("NXRT_VK_WIDE"); s->wide = M.wide_now = e && *e == '1';
     s->aa = vkaa_mode_from(getenv("NXRT_VK_AA"));
@@ -269,6 +276,7 @@ int menu_event(const SDL_Event *e) {
     case SDL_EVENT_MOUSE_BUTTON_UP: case SDL_EVENT_MOUSE_WHEEL: taken = M.open; break;
     case SDL_EVENT_GAMEPAD_BUTTON_DOWN: case SDL_EVENT_GAMEPAD_BUTTON_UP: {
         int down = e->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN, b = e->gbutton.button;
+        if (!front_sdl_pad_here(e->gbutton.which)) break;   // split screen: the other window's controller opens the other window's menu
         SDL_Gamepad *g = SDL_GetGamepadFromID(e->gbutton.which);
         if (b == SDL_GAMEPAD_BUTTON_BACK) M.pad_back = down;
         if (b == SDL_GAMEPAD_BUTTON_START) M.pad_start = down;
@@ -283,7 +291,7 @@ int menu_event(const SDL_Event *e) {
         else if (pad_back(g, b)) { if (M.dd >= 0) push_in(IN_BACK, 0, 0, 0); else set_open(0); }
         break; }
     case SDL_EVENT_GAMEPAD_AXIS_MOTION:
-        if (!M.open) break;
+        if (!M.open || !front_sdl_pad_here(e->gaxis.which)) break;
         taken = 1;
         if (e->gaxis.axis == SDL_GAMEPAD_AXIS_LEFTY || e->gaxis.axis == SDL_GAMEPAD_AXIS_LEFTX) {   // the left stick steps like the D-pad, again every 0.2 s while held
             float v = e->gaxis.value / 32767.0f; uint64_t now = SDL_GetTicksNS(); int y = e->gaxis.axis == SDL_GAMEPAD_AXIS_LEFTY;
@@ -304,7 +312,7 @@ static void q_add(mn_list *l, mn_quad q) {
     if (l->n == l->cap) { int c = l->cap ? 2 * l->cap : 1024; mn_quad *n = realloc(l->q, (size_t)c * sizeof *n); if (!n) return; l->q = n; l->cap = c; }
     l->q[l->n++] = q;
 }
-static void rect(mn_list *l, float x, float y, float w, float h, float r, uint32_t c) { q_add(l, (mn_quad){x, y, x + w, y + h, 0, 0, 0, 0, r, c, MN_RECT}); }
+static void rect(mn_list *l, float x, float y, float w, float h, float r, uint32_t c) { q_add(l, (mn_quad){x, y, x + w, y + h, 0, 0, 0, 0, r, c, c == C_SEL ? MN_FADE : MN_RECT}); }
 static float text_w(const char *t, float px) { float s = px / MF_EM, w = 0; for (; *t; t++) { int c = (unsigned char)*t; if (c >= 32 && c < 127) w += mf_glyphs[c - 32].adv * s; } return w; }
 // Text with its top at y (the font's ascent below it is the baseline)
 static void text(mn_list *l, const char *t, float x, float y, float px, uint32_t c) {
@@ -337,11 +345,16 @@ static void counter_draw(mn_list *out, int W, int H) {   // the FPS counter, top
     uint64_t now = SDL_GetTicksNS();
     if (!M.fps_t0 || now - M.fps_last > 1000000000ull) { M.fps_t0 = now; M.fps_n = 0; }
     M.fps_last = now; M.fps_n++;
-    if (now - M.fps_t0 >= 500000000ull) { double dt = (now - M.fps_t0) / 1e9; M.fps = (float)((M.fps_n - 1) / dt); M.ms = M.fps_n > 1 ? (float)(dt * 1e3 / (M.fps_n - 1)) : 0; M.fps_t0 = now; M.fps_n = 1; }
+    if (now - M.fps_t0 >= 500000000ull) {
+        double dt = (now - M.fps_t0) / 1e9; M.fps = (float)((M.fps_n - 1) / dt); M.ms = M.fps_n > 1 ? (float)(dt * 1e3 / (M.fps_n - 1)) : 0;
+        uint64_t g = vkr_gpu_ns_total(), r = nvn_replay_busy_ns();   // the GPU's and the replay thread's time a frame over the same frames
+        if (M.fps_n > 1 && M.gpu0) { M.gpu_ms = (float)((g - M.gpu0) / 1e6 / (M.fps_n - 1)); M.rep_ms = (float)((r - M.rep0) / 1e6 / (M.fps_n - 1)); }
+        M.gpu0 = g; M.rep0 = r; M.fps_t0 = now; M.fps_n = 1;
+    }
     if (!M.s.counter) return;
     char t[96]; float u = fmaxf(H / 1080.0f, 0.6f), fs = 22 * u;
     if (M.s.counter == 1) snprintf(t, sizeof t, "%.0f fps", M.fps);
-    else { int h = (int)(base_h() * vkt_scale() + 0.5f); snprintf(t, sizeof t, "%.0f fps  |  %.1f ms  |  %dx%d", M.fps, M.ms, (h * 16 + 4) / 9, h); }
+    else { int h = (int)(base_h() * vkt_scale() + 0.5f); snprintf(t, sizeof t, "%.0f fps  |  %.1f ms  |  GPU %.1f ms  |  replay %.1f ms  |  %dx%d", M.fps, M.ms, M.gpu_ms, M.rep_ms, (h * 16 + 4) / 9, h); }
     float w = text_w(t, fs) + 32 * u, h = 40 * u;
     rect(out, 16 * u, 16 * u, w, h, h / 2, C_PANEL);
     text(out, t, 32 * u, 16 * u + (h - fs) / 2, fs, C_TITLE);
@@ -430,7 +443,7 @@ void menu_build(mn_list *out, int W, int H) {
     if (M.tab == 0) {
         for (int r = 0; r < G_N; r++) {
             float y = y_rows + r * row_h; int unused = (r == G_UPSCALE || r == G_SHARP) && fitk <= 0, off = row_off(r, fitk) || (r == G_SHARP && !s->sharp);
-            if (r == M.sel && M.dd < 0) rect(out, px + 24 * u, y + 4 * u, pw - 48 * u, row_h - 8 * u, (row_h - 8 * u) / 2, RGBA(255, 244, 196, 255));
+            if (r == M.sel && M.dd < 0) rect(out, px + 24 * u, y + 4 * u, pw - 48 * u, row_h - 8 * u, (row_h - 8 * u) / 2, C_HI);
             text(out, g_label[r], x_lab, y + (row_h - fs) / 2, fs, off ? C_OFF : C_TEXT);
             rect(out, x_val, y + 8 * u, val_w, row_h - 16 * u, (row_h - 16 * u) / 2, r == M.sel && !unused ? C_SEL : C_PILL);
             if (unused) snprintf(v, sizeof v, "Not used: the picture isn't stretched");   // the reason in place of the value
@@ -440,7 +453,7 @@ void menu_build(mn_list *out, int W, int H) {
             if (unused) {}
             else if (r != G_SHARP) text(out, "v", x_val + val_w - 40 * u, y + (row_h - fs) / 2 - 2 * u, fs * 0.85f, r == M.sel ? C_SELTEXT : C_SOFT);
             else { float bw = val_w - 160 * u, bx = x_val + 120 * u, by = y + row_h / 2 - 4 * u;   // a bar for the sharpness
-                   rect(out, bx, by, bw, 8 * u, 4 * u, r == M.sel ? RGBA(255, 246, 200, 255) : C_TAB); rect(out, bx, by, bw * s->sharpness / 10.0f, 8 * u, 4 * u, C_TITLE); }
+                   rect(out, bx, by, bw, 8 * u, 4 * u, r == M.sel ? C_LIST : C_TAB); rect(out, bx, by, bw * s->sharpness / 10.0f, 8 * u, 4 * u, C_SEL); }
         }
         // the picture against the window, in plain words, when it matters
         if (fitk < 0) snprintf(v, sizeof v, "Your window (%dx%d) is smaller than the picture, so you won't see the extra detail. Make the window bigger or use full screen.", ww, wh);

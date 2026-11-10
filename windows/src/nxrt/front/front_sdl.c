@@ -157,6 +157,7 @@ static int pad_player(fpad *p) {
     if (F.split) return F.split_pad && s == F.split_pad - 1 ? 0 : -1;   // split screen: this window's controller is its player 1, the others are the other window's
     return s;
 }
+int front_sdl_pad_here(uint32_t id) { if (!F.split) return 1; fpad *p = pad_by_id((SDL_JoystickID)id); return p && pad_player(p) == 0; }
 static void players_note(void) { dm_pad_players(F.split ? 1u : pad_slot_mask(&F.slots)); }
 static void pad_light(fpad *p) {   // the player lights; in split screen only this window's controller, lit as its window
     int pl = pad_player(p);

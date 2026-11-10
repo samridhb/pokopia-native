@@ -10,6 +10,12 @@ columns, each action's key in a pill. Commit e98e444 recorded a coloured mockup 
 approved"; that was only a sketch, and this section replaces that wording. From the user's feedback on the first version (2026-11-06): **every size the menu shows is the size the game really draws**, Console mode without
 sizes, a plain-words line about the picture and the window, Upscaling and Sharpness greyed with the reason when unused, and an FPS counter.
 
+**The colours since 2026-11-09** (the user's choice, with the builder and the launchers): the same layout in the GitHub page's fade colours
+(`menu_int.h`). The panel is `#FBF6FD` with a `#EAE2F2` edge; titles are ink `#1C1626`, text `#3A3346`, helper text muted `#6A6277`; fields and tabs
+are in the tint; the selected row is `#FFEAF3`. What was yellow (the active tab, the selected field, the chosen item in a list, the Sharpness bar)
+is now the fade, `#FF3D8E` → `#D23CF0` → `#8A3FFC` from left to right, with white text. Any rectangle drawn in `C_SEL` becomes an `MN_FADE` quad,
+and `menu.frag` colours it by its position. No yellow is left.
+
 **F1** (or a controller's **Minus + Plus**, SDL's Back + Start, together) opens a settings panel over the running game; the same again, Esc / B, or
 the Close button closes it. While it is open the game gets no input (what was held is let go, the mouse is freed from mouse look; key-ups still go
 through, so nothing stays held), and it keeps running behind the panel. Three tabs:
@@ -38,11 +44,15 @@ the game does not draw, so there is one list, the same in both modes, in the men
 | Resolution |
 |---|
 | Default: your monitor (W x H) |
+| 1280x720 (a Steam Deck's screen) |
+| 1600x900 |
 | 1920x1080 (the game's own) |
 | 2560x1440 |
 | 3840x2160 |
 
-Resolution is the real size the game draws at, never less than the game's own.
+Resolution is the real size the game draws at, below the game's own too: a Steam Deck shows 1280x720 of its 1280x800 screen,
+and drawing 1920x1080 only to shrink it there cost a quarter more GPU work for edges a little smoother (docs/deck-perf.md). A Steam Deck starts at
+1280x720 (`scripts/play.sh`); everywhere else Default stays the starting point.
 
 - **Default** is the monitor's height, at least the game's own and at most 2160, shown with the size it draws at ("Default: your monitor
   (2560x1440)"). It is the default: the game starts there unless the player picked something else. The monitor is the one the window is on
@@ -54,8 +64,7 @@ Resolution is the real size the game draws at, never less than the game's own.
 - The factor F-5 draws at (docs/f5-resolution.md) is the chosen height over the game's own (1080): 2560x1440 is 1.333x, 3840x2160 2x. Were a game
   to draw handheld at 720, `base_h` in `front/menu.c` (and `$base` in `play.ps1`) is the one place to change.
 - `display.json` keeps `"resolution": "default"` or `"<w>x<h>"`, the size as saved. A size not in the list (2880x1620 and 5760x3240 from the first
-  menu) keeps its string and means that real size (up to 3240 lines); one below the game's own (1280x720 when docked) shows as and draws the game's
-  own. A bare factor from before the sizes (1, 1.5, 2, 3) is read by the launcher as the size it meant docked (1.5 → 2880x1620).
+  menu) keeps its string and means that real size (from 720 up to 3240 lines); one below 720 draws 1280x720. A bare factor from before the sizes (1, 1.5, 2, 3) is read by the launcher as the size it meant docked (1.5 → 2880x1620).
 - The launcher hands it to the game as `NXRT_VK_RESOLUTION`; `NXRT_VK_SCALE` (a factor) still works and wins, for tests.
 - Changed in the game, the factor changes at the start of the next submission: every render target the F-5 rule takes is made again at the new size,
   its content scaled over (a blit), and those made later follow (`vk_tex.c vkt_apply_scale`).
@@ -82,7 +91,7 @@ screen) and its Resolution.
 | Upscaling | Sharp, Standard (softer) | from the next present (only used when the picture is stretched) |
 | Sharpness | 0–10 | from the next present (Sharp only; only used when the picture is stretched) |
 | Anti-aliasing | Off, FXAA, SMAA | from the next frame: smooths the 3D picture's edges before the HUD is drawn (docs/anti-aliasing.md). SMAA by default. `display.json` "antialiasing", `NXRT_VK_AA` |
-| Frame rate | 60 fps, 30 fps | from the next frame (docs/frame-rate-30.md); the game keeps its speed |
+| Frame rate | 60, 50, 45, 40, 30 fps | from the next frame (docs/frame-rate-30.md); the game keeps its speed |
 | Vsync | On, Off | the swapchain is made again with FIFO or mailbox |
 | FPS counter | Off, Corner, Detailed | at once: a small white pill at the top left with the frames per second; Detailed adds the frame time and the size the game draws at ("60 fps \| 16.7 ms \| 3840x2160"). `display.json` "fps_counter", `NXRT_FPS_COUNTER` |
 | Wide view | Off, On (experimental) | from the next start: on a screen wider than 16:9 the view fills it, the 2D stays in the middle 16:9 (docs/wide-view.md). `display.json` "wide_view", `NXRT_VK_WIDE` |

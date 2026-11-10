@@ -25,6 +25,11 @@
 #define WAITERS_BIT   0x40000000u
 #define H_CUR_THREAD  0xFFFF8000u
 #define GUEST_THREAD_HOST_STACK (16u << 20)   // host stack reservation: the frames of recompiled code (guest frames live on the guest stack)
+// Linux (not Android): timers are exact to the 1 µs slack (plat_timer_resolution), so timed waits and sleeps end on time without yielding through
+// their end, and spin waits back off sooner (a spinning thread takes a 4-core Steam Deck's hardware threads and the power its GPU shares)
+#if defined(__linux__) && !defined(__ANDROID__)
+#define LINUX_TIMERS 1
+#endif
 
 void *guest_thread_init(NxwGuestCpu *cpu);   // thread.c
 void guest_thread_free(void *own);
@@ -224,14 +229,23 @@ static int64_t block(thr_t *t, int kind, int64_t ns) {
             if (now >= deadline) rc = ETIMEDOUT;
 #ifdef _WIN32
             else if (deadline - now > 2500000) SleepConditionVariableSRW(&t->cv, &G, (DWORD)((deadline - now - 1500000) / 1000000), 0);
+            else { pthread_mutex_unlock(&G); wait_until(deadline, &t->woke, ns); pthread_mutex_lock(&G); rc = ETIMEDOUT; }
+#elif defined(LINUX_TIMERS)
+            else {   // Linux: the condition variable to the deadline itself, so a wake ends it at once (pthread's timed wait takes a CLOCK_REALTIME
+                     // deadline); an early return waits again
+                uint64_t until = plat_realtime_ns() + (deadline - now);
+                struct timespec ts = {(time_t)(until / 1000000000u), (long)(until % 1000000000u)};
+                pthread_cond_timedwait(&t->cv, &G, &ts);
+                continue;
+            }
 #else
-            else if (deadline - now > 2500000) {   // Linux: the same shape; pthread's timed wait takes a CLOCK_REALTIME deadline
+            else if (deadline - now > 2500000) {   // the same shape as Windows; pthread's timed wait takes a CLOCK_REALTIME deadline
                 uint64_t until = plat_realtime_ns() + (deadline - now - 1500000);
                 struct timespec ts = {(time_t)(until / 1000000000u), (long)(until % 1000000000u)};
                 pthread_cond_timedwait(&t->cv, &G, &ts);
             }
-#endif
             else { pthread_mutex_unlock(&G); wait_until(deadline, &t->woke, ns); pthread_mutex_lock(&G); rc = ETIMEDOUT; }
+#endif
         } else rc = pthread_cond_wait(&t->cv, &G);
         if (rc == ETIMEDOUT && !t->woke && (!det_wait || guest_ns() >= guest_deadline)) { wait_unlink(t); t->wkind = 0; return R_TIMEOUT; }
     }
@@ -446,10 +460,15 @@ void nxrt_thread_dump(void) { svc_thread_dump(); }
 // These are cooperative boundaries, not an asynchronous guest-core scheduler.
 static int svc_thread_impl(int num, uint64_t *regs);
 // Yield back-off: a guest loop that polls the tick and yields becomes a host busy spin. A run of yields with no other SVC between them (and no progress, thr_yield) is let through as
-// a plain yield for its first 2 ms; after that each yield sleeps an eighth of the run so far, between 10 and 250 µs.
-// DM_YIELD_BACKOFF=0 turns it off; DM_YIELD_BACKOFF=<cap µs>[:<start µs>] sets the cap and the run length after which it starts (default 250:2000)
+// a plain yield for its first 2 ms (200 µs on Linux); after that each yield sleeps an eighth of the run so far, between 10 and 250 µs.
+// DM_YIELD_BACKOFF=0 turns it off; DM_YIELD_BACKOFF=<cap µs>[:<start µs>] sets the cap and the run length after which it starts (default 250:2000; 250:200 on Linux)
+#ifdef LINUX_TIMERS
+#define BACKOFF_START_NS 200000
+#else
+#define BACKOFF_START_NS 2000000
+#endif
 static uint64_t yield_backoff_ns(uint64_t run_ns) {
-    static int64_t cap = -1, start = 2000000;
+    static int64_t cap = -1, start = BACKOFF_START_NS;
     if (cap < 0) { const char *e = getenv("DM_YIELD_BACKOFF"); cap = 250000;
         if (e && *e) { cap = atoll(e) * 1000; const char *c = strchr(e, ':'); if (c) start = atoll(c + 1) * 1000; }
         if (!cap) LOG("DM_YIELD_BACKOFF=0: no back-off on repeated yields (plain yield spin)"); else if (e && *e) LOG("DM_YIELD_BACKOFF: back off after %lld µs of repeated yields, sleeping at most %lld µs at a time", (long long)(start / 1000), (long long)(cap / 1000)); }
@@ -475,12 +494,12 @@ static void thr_yield(thr_t *me, const uint64_t *regs) {
     me->poll_ret = now_ns();
 }
 // Spin waits: a guest loop that polls memory with no SVC (nxanalyze's spin loops; the lifter calls rt_yield on their back edges). A wait (passes with no SVC between them
-// and at most SPIN_GAP_NS of guest work between two) polls on for its first DM_SPIN_POLL µs (2000), and then sleeps as a run of yields does.
+// and at most SPIN_GAP_NS of guest work between two) polls on for its first DM_SPIN_POLL µs (2000; 200 on Linux), and then sleeps as a run of yields does.
 // DM_SPIN=0: no sleeps either. site = the loop head (guest address)
 #define SPIN_GAP_NS 20000
 void dm_spin_wait(uint64_t site) {
     static int on = -1; static uint64_t poll_ns;
-    if (on < 0) { const char *e = getenv("DM_SPIN"), *p = getenv("DM_SPIN_POLL"); poll_ns = (p && *p ? strtoull(p, 0, 10) : 2000) * 1000; on = !(e && *e && atoi(e) == 0);
+    if (on < 0) { const char *e = getenv("DM_SPIN"), *p = getenv("DM_SPIN_POLL"); poll_ns = (p && *p ? strtoull(p, 0, 10) : BACKOFF_START_NS / 1000) * 1000; on = !(e && *e && atoi(e) == 0);
                   if (!on) LOG("DM_SPIN=0: spin waits do not yield or sleep"); else if (p && *p) LOG("DM_SPIN_POLL: spin waits poll for %llu µs, then yield", (unsigned long long)(poll_ns / 1000)); }
     thr_t *me = t_self;
     if (!me) return;
@@ -520,6 +539,11 @@ static _Atomic int64_t g_timer_late = 450000;
 static void wait_until(uint64_t dl, const int *woke, int64_t asked) {
     uint64_t now = now_ns();
     if (now >= dl) return;
+#ifdef LINUX_TIMERS
+    (void)asked;   // Linux: asleep to the deadline (a sleep never ends early); a wake hint is looked at between naps of at most 200 µs
+    for (; now < dl && !(woke && __atomic_load_n(woke, __ATOMIC_ACQUIRE)); now = now_ns()) plat_sleep_ns(woke && dl - now > 200000 ? 200000 : dl - now);
+    return;
+#endif
     if (asked > 150000) {
         int64_t late = atomic_load_explicit(&g_timer_late, memory_order_relaxed), rem = (int64_t)(dl - now);
         if (rem <= late) plat_sleep_ns((uint64_t)rem);

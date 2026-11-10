@@ -229,7 +229,8 @@ int coop_vnet_select(coop_node *n, int nfds, uint64_t *rd, uint64_t *wr, uint64_
 // callback writes takes effect. Every player in a session must have the same setting: a port adds COOP_INTERACT_MOD to its mods fingerprint.
 // "Story co-op (experimental)" (docs/story-coop.md), DM_COOP_STORY=1, implies Interact everywhere and adds the story sites; a port that attaches them
 // adds COOP_STORY_MOD after COOP_INTERACT_MOD ----------
-enum { COOP_SITE_MASK = 1, COOP_SITE_TALK = 2, COOP_SITE_ROLE = 3, COOP_SITE_ALONE = 4, COOP_SITE_ALONE8 = 5 };
+enum { COOP_SITE_MASK = 1, COOP_SITE_TALK = 2, COOP_SITE_ROLE = 3, COOP_SITE_ALONE = 4, COOP_SITE_ALONE8 = 5,
+       COOP_SITE_STAGEONE = 6, COOP_SITE_SPECROW = 7, COOP_SITE_SPECROW2 = 8, COOP_SITE_SPECLOCK = 9 };
 typedef struct coop_site {
     const char *build;   // main's build ID, its first 32 hex digits (the rewriter's key)
     uint32_t fn, off;    // the function holding the site and the site, main offsets (a site past a tail call can sit in the function it reaches)
@@ -243,6 +244,10 @@ int coop_interact_on(void);   // DM_COOP_INTERACT=1, or Story co-op on
 int coop_story_on(void);
 int coop_interact_sites(const char *main_build, const coop_site **out);   // the sites of this main build (a run of them) and their count; 0: unsupported
 int coop_story_sites(const char *main_build, const coop_site **out);      // the same for Story co-op's sites
+// The Spectator Mode text Interact everywhere makes untrue in story areas (the host's hosting notes, the settings row's "On"). Attached with
+// Interact everywhere but not part of the mods fingerprint (they change only what this player reads); one that does not match is skipped alone.
+// The row's site writes the game's memory through a register (a port whose guest addresses are not the host's must leave that site out)
+int coop_text_sites(const char *main_build, const coop_site **out);
 void coop_interact_site(int id, uint64_t *x);
 uint64_t coop_mods_add(uint64_t h, const char *name);   // a mods fingerprint (0: none so far) with one more named mod
 

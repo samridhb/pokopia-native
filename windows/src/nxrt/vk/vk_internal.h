@@ -34,6 +34,7 @@ typedef struct {
     int corpus_ok;   // everything the translated corpus declares (docs/m5-record-shaders.md section 7): draw parameters, subgroup ballot / vote / shuffle, formatless storage images, gather, geometry
     uint32_t subgroup_stages, subgroup_ops, subgroup_size;
     uint32_t sg32_stages, sg32_max_wg; int sg32_full;   // stages whose subgroup-using shaders are made with 32-lane subgroups (vk_dev.c), the most subgroups a work group may have, full ones
+    int sg32_emulate;   // 64-lane subgroups made to act as 32-lane ones in the shaders (vk_shader.c, vkspv_sg32_emulate)
 } vk_caps;
 
 typedef struct {

@@ -13,7 +13,7 @@ void dm_guest_write_prepare(void *addr, size_t len);   // host/crash.c: unprotec
 int dm_guest_readable_run(uint64_t a, uint64_t *end);   // host/hle_svc.c: what VirtualQuery tells on Windows
 #endif
 
-enum { PAGE = 4096, GRAN = 2u << 20, HOT_STREAK = 3, HOT_COOL_FRAMES = 240, MAXPOOL = 4096, RUN_MAX = 1024, MAXWIN = 32, OVF_BLOCK = 32u << 20 };
+enum { PAGE = 4096, GRAN = 2u << 20, HOT_STREAK = 3, HOT_GAP = 64, HOT_COOL_FRAMES = 240, HOT_COOL_GAP = 1920, MAXPOOL = 4096, RUN_MAX = 1024, MAXWIN = 32, OVF_BLOCK = 32u << 20, MEMO_N = 16 };
 // A pool larger than the device's largest buffer (AMD: 2 GiB; the game's biggest pool is 3.4 GiB) gets several buffers, windows over it. With sparse
 // binding and aliasing the windows overlap and share the same memory, so any range up to the overlap fits in one of them; otherwise they are side by side.
 typedef struct {
@@ -26,12 +26,14 @@ typedef struct {
     vk_alloc mem[MAXWIN];         // not sparse: one allocation per window
     const void *span;             // the dirty tracker's range (registered by the recording layer right after gfx_pool_add)
     uint64_t *up;                 // per page: the tracker's stamp when its device copy was taken (0 = never copied)
-    uint32_t *last_dirty; uint8_t *streak, *hot;   // hot pages: written in HOT_STREAK consecutive frames, left writable and copied once per submission
+    uint32_t *last_dirty; uint8_t *streak, *hot;   // hot pages: rewritten HOT_STREAK times, each within HOT_GAP frames of the one before; left writable and copied once per submission
     uint8_t *committed;           // per page: seen committed and readable once (pool_sync asks VirtualQuery only for pages not known yet)
     _Atomic uint8_t *gpu_pending;   // per page: GPU writes recorded whose bytes have not reached guest memory yet (the device copy is the newer one)
     uint8_t *wb_since;            // per page: a GPU write landed in guest memory since its last copy (NXRT_VK_UPLOAD_TOP's reasons)
     uint32_t *hot_sub;            // per hot page: the submission (its timeline value's low bits) it was last copied for
     uint64_t hot_n, cursor;       // vkm_sync_all's position
+    uint64_t cool_at;             // the next page to cool (NXRT_VK_HOT_HIST: a slice a frame)
+    struct { uint64_t p0, p1, writes; uint32_t sub; } memo[MEMO_N]; unsigned memo_i;   // ranges vkm_use found current in submission sub (vkm_use)
 } pool_t_;
 
 static pool_t_ *g_pool[MAXPOOL]; static int g_npool;
@@ -49,6 +51,7 @@ static struct {
 
 static uint64_t g_budget = 64ull << 20, g_budget_used;
 static _Atomic uint64_t s_up_bytes, s_up_pages, s_up_runs, s_up_ns, s_sync, s_st_bytes, s_st_ovf, s_st_ovf_blocks, s_st_waits, s_wb_bytes, s_uncommitted;
+static _Atomic uint64_t s_memo_hits, s_pending_skips;   // vkm_use calls the memo answered; pages left for a GPU write in flight
 
 // NXRT_VK_UPLOAD_TOP=1 (diagnosis): with each memory line, the ranges copied most since the last one, how often, and why their pages were behind
 static int g_top;
@@ -322,10 +325,16 @@ static int guest_copy(void *dst, const void *src, size_t n) {
 }
 #endif
 
-static void page_rewritten(pool_t_ *p, uint64_t pg) {   // a page copied before and written again: hot after HOT_STREAK frames in a row
-    if (p->last_dirty[pg] == (uint32_t)g_frame) return;
-    p->streak[pg] = p->last_dirty[pg] + 1 == (uint32_t)g_frame ? (uint8_t)(p->streak[pg] < 255 ? p->streak[pg] + 1 : 255) : 1;
-    p->last_dirty[pg] = (uint32_t)g_frame;
+// A page copied before and written again: hot once rewritten HOT_STREAK times, each within HOT_GAP frames of the one before. The game streams its
+// per-frame data through a ring in pool 0 that comes round about every 40 frames: with "HOT_STREAK frames in a row" none of it was hot, and each page
+// faulted and was protected again at every pass, most of the field's 400 faults a frame (10 hot pages). A hot page costs a copy at each submission that
+// uses it instead. NXRT_VK_HOT_HIST=0: in a row, as before
+static int g_hot_hist = 1;
+static void page_rewritten(pool_t_ *p, uint64_t pg) {
+    uint32_t f = (uint32_t)g_frame, d = f - p->last_dirty[pg];
+    if (!d) return;
+    p->streak[pg] = d <= (g_hot_hist ? (uint32_t)HOT_GAP : 1u) ? (uint8_t)(p->streak[pg] < 255 ? p->streak[pg] + 1 : 255) : 1;
+    p->last_dirty[pg] = f;
     if (p->streak[pg] >= HOT_STREAK && !p->hot[pg]) { p->hot[pg] = 1; p->hot_n++; }
 }
 // Whether page pg's device copy is behind guest memory: never copied, written (a fault stamped it) since its copy, or hot and not copied yet for submission sub;
@@ -334,7 +343,7 @@ static void page_rewritten(pool_t_ *p, uint64_t pg) {   // a page copied before 
 // dozen draws and dispatches a frame was 50-94 MB of uploads. sub 0 (no submission, or NXRT_VK_HOT_EVERY_USE=1): at every use
 static int g_hot_once = 1;
 static inline int page_needs(pool_t_ *p, uint64_t pg, uint32_t sub) {
-    if (atomic_load(&p->gpu_pending[pg])) return 0;   // a GPU write in flight: the device copy is ahead until its bytes are written back
+    if (atomic_load(&p->gpu_pending[pg])) { atomic_fetch_add(&s_pending_skips, 1); return 0; }   // a GPU write in flight: the device copy is ahead until its bytes are written back
     if (!p->up[pg] || !p->span) return 1;
     if (p->hot[pg]) return !sub || p->hot_sub[pg] != sub;
     return nvn_dirty_since_span(p->span, (const void *)(p->base + pg * PAGE), PAGE, p->up[pg]);
@@ -374,7 +383,7 @@ static uint64_t pool_sync(pool_t_ *p, uint64_t p0, uint64_t p1, VkCommandBuffer 
         if (!(pg & 63) && pg + 64 <= p1 && group_clean(p, pg)) { pg += 64; continue; }
         if (!page_needs(p, pg, sub)) { pg++; continue; }
         uint64_t run0 = pg;
-        while (pg < p1 && pg - run0 < RUN_MAX && page_needs(p, pg, sub)) { if (p->up[pg] && !p->hot[pg]) page_rewritten(p, pg); pg++; }
+        while (pg < p1 && pg - run0 < RUN_MAX && page_needs(p, pg, sub)) { if (p->up[pg] && !p->hot[pg] && !(p->wb_since && p->wb_since[pg])) page_rewritten(p, pg); pg++; }
         // Pages the game never touched are not committed (the heap commits lazily): nothing to read or protect there. A use reads them as zeros and
         // keeps asking (they stay "never copied"); the background sync steps over the whole uncommitted region. VirtualQuery walks the address space's
         // regions, which the tracker's protections split finely: in gameplay it was 70 % of the render thread's time. Pages seen committed are remembered
@@ -441,7 +450,23 @@ int vkm_use(uint64_t addr, uint64_t len, VkBuffer *buf, VkDeviceSize *off) {
     VkCommandBuffer cb = vks_upload_cb();
     if (!cb) return 1;
     atomic_fetch_add(&s_sync, 1);
-    pool_sync(p, (addr - p->base) / PAGE, (addr + (len ? len : 1) - p->base + PAGE - 1) / PAGE, cb, UINT64_MAX, NULL);
+    uint64_t p0 = (addr - p->base) / PAGE, p1 = (addr + (len ? len : 1) - p->base + PAGE - 1) / PAGE;
+    if (p1 > p->npages) p1 = p->npages;
+    // A range already found current in this submission, with nothing in its pool written since, needs no new scan: every buffer binding of every draw
+    // used to scan its pages again (thousands a frame). Not remembered: a range with pages left for a GPU write in flight or not committed yet, one cut
+    // short, or with no submission to tie it to. NXRT_VK_SYNC_MEMO=0: scanned at every use
+    static int memo_on = -1;
+    if (memo_on < 0) { const char *e = getenv("NXRT_VK_SYNC_MEMO"); memo_on = !(e && *e == '0') && g_hot_once; if (!memo_on) VKLOG("NXRT_VK_SYNC_MEMO=0: buffer ranges are scanned at every use"); }
+    if (!p->span) p->span = nvn_dirty_span((const void *)p->lo, p->hi - p->lo);
+    uint32_t sub = memo_on ? (uint32_t)vks_recording_value() : 0;
+    uint64_t w = sub ? nvn_dirty_span_writes(p->span) : 0;
+    if (w) for (int i = 0; i < MEMO_N; i++)
+        if (p->memo[i].sub == sub && p->memo[i].p0 == p0 && p->memo[i].p1 == p1 && p->memo[i].writes == w) { atomic_fetch_add(&s_memo_hits, 1); return 1; }
+    uint64_t unc = atomic_load(&s_uncommitted), pend = atomic_load(&s_pending_skips), stop = p0;
+    pool_sync(p, p0, p1, cb, UINT64_MAX, &stop);
+    if (w && stop >= p1 && atomic_load(&s_uncommitted) == unc && atomic_load(&s_pending_skips) == pend) {
+        unsigned i = p->memo_i++ % MEMO_N; p->memo[i].p0 = p0; p->memo[i].p1 = p1; p->memo[i].writes = w; p->memo[i].sub = sub;
+    }
     return 1;
 }
 
@@ -575,7 +600,14 @@ void vkm_stats(vkm_stats_t *s) {
 void vkm_frame_tick(uint64_t frame) {
     static vkm_stats_t prev; static uint64_t prev_frame, t_prev;
     g_frame = frame + 1; g_budget_used = 0;
-    if (frame % HOT_COOL_FRAMES == 0) {   // hot pages cool down: protected again at their next copy; written again, they come back within HOT_STREAK frames
+    if (g_hot_hist) {   // hot pages cool down a slice a frame, each once every HOT_COOL_GAP frames: protected again at their next copy (all at once, the ring's
+        AcquireSRWLockShared(&g_lk);   // pages faulted back in a burst of a few hundred a frame); written again, they come back after HOT_STREAK rewrites
+        for (int i = 0; i < g_npool; i++) {
+            pool_t_ *p = g_pool[i]; uint64_t n = p->npages / HOT_COOL_GAP + 1;
+            for (uint64_t j = 0; j < n && p->npages; j++) { uint64_t k = p->cool_at++ % p->npages; if (p->hot[k]) { p->hot[k] = 0; p->up[k] = 0; p->streak[k] = 0; p->hot_n--; } }
+        }
+        ReleaseSRWLockShared(&g_lk);
+    } else if (frame % HOT_COOL_FRAMES == 0) {   // hot pages cool down: protected again at their next copy; written again, they come back within HOT_STREAK frames
         AcquireSRWLockShared(&g_lk);
         for (int i = 0; i < g_npool; i++) { pool_t_ *p = g_pool[i]; for (uint64_t k = 0; k < p->npages; k++) if (p->hot[k]) { p->hot[k] = 0; p->up[k] = 0; p->streak[k] = 0; } p->hot_n = 0; }   // copied (and protected) again at the next sync
         ReleaseSRWLockShared(&g_lk);
@@ -584,25 +616,28 @@ void vkm_frame_tick(uint64_t frame) {
     vkm_stats_t s; vkm_stats(&s);
     uint64_t df = frame - prev_frame, now = now_ns(); double secs = t_prev ? (now - t_prev) / 1e9 : 0;
     uint64_t budget = 0, usage = 0; vk_budget(&budget, &usage);
-    static uint64_t kept_prev; uint64_t kept = atomic_load(&s_wb_kept);
+    static uint64_t kept_prev, memo_prev; uint64_t kept = atomic_load(&s_wb_kept);
     VKLOG("memory up to frame %llu: %llu pools %.1f MB (backed %.1f MB, %llu sparse); per frame: uploaded %.1f KB in %.1f runs (%.3f ms CPU), %.1f write faults (protection changes %.3f ms), "
-          "%.1f host pre-writes, written back %.1f KB (%.1f KB of it not copied up again), %.0f MB of uncommitted pool stepped over; hot pages %llu; staging overflow %llu (in %llu buffers) waits %llu; video memory %.0f / %.0f MB%s",
+          "%.1f host pre-writes, written back %.1f KB (%.1f KB of it not copied up again), %.0f MB of uncommitted pool stepped over; hot pages %llu; %.1f buffer range checks (%.1f of them already current in the submission); "
+          "staging overflow %llu (in %llu buffers) waits %llu; video memory %.0f / %.0f MB%s",
           (unsigned long long)frame, (unsigned long long)s.pools, s.pool_bytes / 1048576.0, s.bound_bytes / 1048576.0, (unsigned long long)s.sparse_pools,
           (s.up_bytes - prev.up_bytes) / 1024.0 / df, (double)(s.up_runs - prev.up_runs) / df, (s.up_ns - prev.up_ns) / 1e6 / df,
           (double)(s.faults - prev.faults) / df, (s.fault_ns - prev.fault_ns) / 1e6 / df, (double)(s.preps - prev.preps) / df,
-          (s.writeback_bytes - prev.writeback_bytes) / 1024.0 / df, (kept - kept_prev) / 1024.0 / df, (s.uncommitted_pages - prev.uncommitted_pages) * 4096.0 / 1048576.0 / df, (unsigned long long)s.hot_pages, (unsigned long long)s.staging_overflow,
+          (s.writeback_bytes - prev.writeback_bytes) / 1024.0 / df, (kept - kept_prev) / 1024.0 / df, (s.uncommitted_pages - prev.uncommitted_pages) * 4096.0 / 1048576.0 / df, (unsigned long long)s.hot_pages,
+          (double)(s.sync_calls - prev.sync_calls) / df, (double)(atomic_load(&s_memo_hits) - memo_prev) / df, (unsigned long long)s.staging_overflow,
           (unsigned long long)atomic_load(&s_st_ovf_blocks), (unsigned long long)s.staging_waits, usage / 1048576.0, budget / 1048576.0, secs > 0 ? "" : "");
-    if (g_top) top_log(df);
-    prev = s; prev_frame = frame; t_prev = now; kept_prev = kept;
+    if (g_top) { top_log(df); char fw[600]; nvn_dirty_fault_where(fw, sizeof fw, df); if (*fw) VKLOG("  write faults by MB, a frame: %s", fw); }
+    prev = s; prev_frame = frame; t_prev = now; kept_prev = kept; memo_prev = atomic_load(&s_memo_hits);
 }
 
 int vkm_init(void) {
     InitializeSRWLock(&g_st.lk);
     const char *e = getenv("NXRT_VK_UPLOAD_MB"); if (e && atoi(e) > 0) g_budget = (uint64_t)atoi(e) << 20;
     e = getenv("NXRT_VK_SCAN_PAGES"); if (e && atoi(e) > 0) g_scan_pages = (uint64_t)atoi(e);
-    e = getenv("NXRT_VK_UPLOAD_TOP"); g_top = e && atoi(e) > 0;
+    e = getenv("NXRT_VK_UPLOAD_TOP"); g_top = e && atoi(e) > 0; if (g_top) nvn_dirty_fault_where_on();
     e = getenv("NXRT_VK_WB_RECOPY"); g_wb_keep = !(e && atoi(e) > 0);
     e = getenv("NXRT_VK_HOT_EVERY_USE"); g_hot_once = !(e && atoi(e) > 0);
+    e = getenv("NXRT_VK_HOT_HIST"); g_hot_hist = !(e && *e == '0'); if (!g_hot_hist) VKLOG("NXRT_VK_HOT_HIST=0: pages are hot after %d frames in a row (cooled every %d frames)", HOT_STREAK, HOT_COOL_FRAMES);
     VkDeviceSize ring = g_budget < (16u << 20) ? (16u << 20) : g_budget > (256u << 20) ? (256u << 20) : g_budget;
     // Integrated GPUs (the Steam Deck, Intel and AMD laptops) finish frames later, so more of them still read the ring, and its memory is the same RAM
     // either way: 256 MB. 64 overflowed about once a frame on an Arc 140V, each overflow a wait; 256 none (Apocal's measurements)

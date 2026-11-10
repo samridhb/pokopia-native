@@ -28,6 +28,7 @@ static CONDITION_VARIABLE g_cv = CONDITION_VARIABLE_INIT;   // a slot freed / a 
 static HANDLE g_thread; static _Atomic int g_stop;
 static int g_batch = 4;                     // NXRT_VK_BATCH: committed submissions held back before one queue submit
 static _Atomic uint64_t g_subs, g_qsubs, g_empty, g_posted;
+static uint64_t g_sub_serial;               // counts vks_begin (vks_sub_serial)
 #include "nvn_timestamp.h"   // gfx/: NVN counter records count 614.4 MHz ticks of the guest clock
 uint64_t guest_ns(void);
 
@@ -146,7 +147,7 @@ void vks_begin(void) {
     nvn_dirty_submission();
     AcquireSRWLockExclusive(&g_lk);
     if (g_cur >= 0) VKRED("submission begun while another is being recorded");
-    else { g_cur = slot_take(); g_cur_tid = GetCurrentThreadId(); }
+    else { g_cur = slot_take(); g_cur_tid = GetCurrentThreadId(); g_sub_serial++; }
     ReleaseSRWLockExclusive(&g_lk);
 }
 static int cur_here(void) { return g_cur >= 0 && GetCurrentThreadId() == g_cur_tid; }
@@ -213,6 +214,7 @@ void vks_stats(uint64_t *subs, uint64_t *qsubs, uint64_t *empty, uint64_t *poste
 // ---------- One-shot command buffers (bring-up, readbacks, tests) on a slot of their own, ordered with everything else ----------
 static __thread int t_once = -1;
 int vks_owner(void) { return t_once >= 0 ? t_once : cur_here() ? g_cur : -1; }   // the slot this thread records into (-1 = none): staging allocations belong to it
+uint64_t vks_sub_serial(void) { return t_once < 0 && cur_here() ? g_sub_serial : 0; }
 VkCommandBuffer vk_once_begin(void) {
     AcquireSRWLockExclusive(&g_lk); t_once = slot_take(); ReleaseSRWLockExclusive(&g_lk);
     return g_slot[t_once].main;

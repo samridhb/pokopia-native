@@ -989,6 +989,33 @@ static void test_story(void) {
     env_set("DM_COOP_STORY", "0"); CHECK(!coop_story_on()); CHECK(!coop_interact_on());
     env_set("DM_COOP_STORY", NULL);
 }
+static void test_text(void) {   // the Spectator Mode text in story areas
+    fprintf(stderr, "== text\n");
+    const coop_site *s = NULL;
+    CHECK_EQ(coop_text_sites("76a489f3bd3642fa5e18bd83d32c98bacc5f7d0e", &s), 4);
+    CHECK(s && s->id == COOP_SITE_STAGEONE && s->off == 0xf29be0 && s->fn == 0xf29400 && s->word == 0x7200001fu);
+    CHECK(s && s[1].id == COOP_SITE_SPECROW && s[1].off == 0x100e7cc && s[2].id == COOP_SITE_SPECROW2 && s[2].off == 0x100e7dc && s[2].fn == 0x100e72c);
+    CHECK(s && s[3].id == COOP_SITE_SPECLOCK && s[3].off == 0x10076b4 && s[3].fn == 0x1007380 && s[3].word == 0x7100051fu);
+    CHECK_EQ(coop_text_sites("816c5358e8178d802fcec4a7ce5a741a", &s), 4);   // 1.0.5
+    CHECK(s && s->off == 0xe54180 && s->fn == 0xe539a0 && s[1].off == 0xf29a0c && s[2].off == 0xf29a1c && s[2].word == 0x71000d3fu);
+    CHECK(s && s[3].off == 0xf22ad4 && s[3].fn == 0xf227a0 && s[3].word == 0x7100051fu);
+    CHECK_EQ(coop_text_sites("0000000000000000000000000000000000000000", &s), 0);
+    uint64_t x[31] = {0}; uint32_t row[0x440 / 4]; memset(row, 0, sizeof row);
+    x[0] = 1; coop_interact_site(COOP_SITE_STAGEONE, x); CHECK_EQ(x[0], 1);   // off: the game's answer stands
+    x[8] = 1; x[19] = (uint64_t)(uintptr_t)row; coop_interact_site(COOP_SITE_SPECROW, x); CHECK_EQ(x[8], 1); CHECK_EQ(row[0x400 / 4], 0);
+    env_set("DM_COOP_INTERACT", "1");
+    coop_interact_site(COOP_SITE_STAGEONE, x); CHECK_EQ(x[0], 0);   // on: a story area is not one (the notes are skipped)
+    x[8] = 1; coop_interact_site(COOP_SITE_SPECROW, x); CHECK_EQ(x[8], 12); CHECK_EQ(row[0x400 / 4], 1);   // stage 1: "Off", Palette Town's path
+    x[9] = 3; coop_interact_site(COOP_SITE_SPECROW2, x); CHECK_EQ(x[9], 0);   // and no screen forces "On"
+    row[0x400 / 4] = 0; x[8] = 12; coop_interact_site(COOP_SITE_SPECROW, x); CHECK_EQ(x[8], 12); CHECK_EQ(row[0x400 / 4], 0);   // Palette Town: its own
+    x[9] = 3; coop_interact_site(COOP_SITE_SPECROW2, x); CHECK_EQ(x[9], 3);
+    x[8] = 13; coop_interact_site(COOP_SITE_SPECROW, x); CHECK_EQ(x[8], 13); CHECK_EQ(row[0x400 / 4], 0);   // another town (13): as the game has it
+    x[8] = 4; coop_interact_site(COOP_SITE_SPECLOCK, x); CHECK_EQ(x[8], 4);   // after another town's row: the handler's context stands
+    x[8] = 10; coop_interact_site(COOP_SITE_SPECROW, x); CHECK_EQ(row[0x400 / 4], 1);   // the last story area
+    x[8] = 4; coop_interact_site(COOP_SITE_SPECLOCK, x); CHECK_EQ(x[8], 1);   // and its row is locked as in the hosting context
+    x[9] = 5; x[19] = 0x1000; coop_interact_site(COOP_SITE_SPECROW2, x); CHECK_EQ(x[9], 5);   // another row: untouched
+    env_set("DM_COOP_INTERACT", NULL);
+}
 
 int main(int argc, char **argv) {
     const char *v = getenv("COOP_TEST_VERBOSE"), *m = getenv("COOP_TEST_MDNS");
@@ -1024,7 +1051,7 @@ int main(int argc, char **argv) {
     if (want_inet) test_inet();
     if (want_relay) test_relay();
     if (want_probe) test_probe();
-    if (want_interact) { test_interact(); test_story(); }
+    if (want_interact) { test_interact(); test_story(); test_text(); }
     if (want_nat) test_nat();
     fprintf(stderr, "%d checks, %d failed\n", g_checks, g_fail);
     return g_fail ? 1 : 0;

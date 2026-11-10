@@ -88,6 +88,11 @@ size_t vkspv_ballot_per_lane(uint32_t **words, size_t nwords, int *rewritten);
 // Whether that rewrite applies: NVIDIA's GPUs (vendor 0x10de) only, whose hang it is (the lane's own bit assumes 32-lane subgroups, and lavapipe crashes in
 // the rewritten counters); env, NXRT_VK_BALLOT_FIX, decides when given: 0 off, anything else on
 int vkspv_ballot_fix_wanted(uint32_t vendor, const char *env);
+// 64-lane subgroups made to act as two 32-lane warps (#40, AMD's GCN): the lane index, lane masks, ballots, Any, All and shuffles within the lane's 32-lane half.
+// The new word count (*words replaced) and *rewritten instructions; nwords when nothing changed, *why set when the module has something this does not handle
+size_t vkspv_sg32_emulate(uint32_t **words, size_t nwords, int *rewritten, const char **why);
+// Whether that rewrite applies: where subgroups may have 64 lanes (size or the largest size 64); env, NXRT_VK_SUBGROUP32: 0 never, emulate on any GPU (a test)
+int vkspv_sg32_emulate_wanted(uint32_t size, uint32_t max_size, const char *env);
 // A loop over a texel table's items whose count is word `word` of count_var (634565ab77c61463's word 0, D-1; 560a0262fe47818a's words 12 and 13, D-11): its integer
 // comparisons get min(count, the items tex_var holds, stride texels each), the unsigned minimum for a count read as unsigned. The table may be a 2D texture in
 // rows of 16384 texels or a texel buffer (the kit's corpus); without tex_var the count is capped at 16384. The new word count (*words replaced) and *limited

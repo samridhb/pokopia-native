@@ -18,6 +18,7 @@ void front_sdl_hints(void);                 // before the controller subsystem s
 typedef struct { uint32_t id; int player, type; char name[64], guid[40]; } front_pad_info;
 int front_sdl_pads(front_pad_info *out, int max);
 void front_sdl_player1(uint32_t id);        // that controller made player 1 (on the window thread, soon after); the one that was swaps places with it
+int front_sdl_pad_here(uint32_t id);        // the controller plays in this window (on the window thread): any one, except in split screen, where only its own
 
 #ifdef __cplusplus
 }

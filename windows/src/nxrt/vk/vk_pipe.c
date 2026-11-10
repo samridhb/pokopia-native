@@ -578,6 +578,9 @@ int vkpl_init(void) {
         g_vkp_dyn.topo_unrestricted = p3.dynamicPrimitiveTopologyUnrestricted;
     }
     g_vkp_dyn.logic_op = g_vk.has.eds2_logic_op && vkCmdSetLogicOpEXT;
+    { const char *e = getenv("NXRT_VK_DYNAMIC");   // =0: vertex input and colour blending baked into each pipeline (on RADV no vertex prolog or fragment epilog; more pipelines)
+      if (e && *e == '0') { g_vkp_dyn.vertex_input = g_vkp_dyn.blend_enable = g_vkp_dyn.blend_eq = g_vkp_dyn.write_mask = 0;
+                            VKLOG("NXRT_VK_DYNAMIC=0: vertex input and colour blending are baked into the pipelines"); } }
     g_vkp_dyn.patch_points = g_vk.has.eds2_patch_points && vkCmdSetPatchControlPointsEXT;
     VKLOG("replay pipelines: dynamic vertex input %d, blend enable / equation / write mask %d/%d/%d, logic op %d/%d, alpha to coverage %d, polygon mode %d, depth clamp %d, unrestricted topology %d",
           g_vkp_dyn.vertex_input, g_vkp_dyn.blend_enable, g_vkp_dyn.blend_eq, g_vkp_dyn.write_mask, g_vkp_dyn.logic_op_enable, g_vkp_dyn.logic_op, g_vkp_dyn.a2c,

@@ -35,11 +35,21 @@ Off by default. On a 21:9 (or wider) window or monitor, the game's 3D view fills
    - A copy of a whole 16:9 picture of a render target drawn larger, out to the CPU or into a texture at the game's size, takes the picture's middle 16:9 part, stretched (`wide_unsqueeze`).
    - The result is what a 16:9 camera would have seen: the area inside the viewfinder, at the right proportions.
    - Copies between targets drawn larger (history, refraction) keep the whole view, as do copies of part of a picture.
+6. **Markers over their objects** (speech bubbles, "i", "This way!"; `host/rt.c`, `w2s_hook`). On with the wide view; `NXRT_WIDE_W2S=0` turns it off.
+   - The game places them with its world-to-screen: 2.0.1 `main+0x10fc06c`, 1.0.5 `main+0x100c60c`. It is the same leaf function in both; only its
+     matrix slot differs (`+0x4ab0`, `+0x4250` per view, 0x260 apart).
+   - It maps a world point through the view's view-projection to 1920x1080 pixels. That matrix comes from the widened camera, so a marker lands at its
+     object's widened position. The squeeze (3) then pulls it toward the middle again: by f, so ×0.75 at 21:9 and ×0.5 at 32:9.
+   - The function runs in the interpreter with a hook at its `ret`, where x1 still points at the result. It moves x to `960 + (x - 960) / f`,
+     where the squeeze brings it back over the object. The entry and `ret` words are checked first.
+   - The game's world → layout step (`main+0xab55e0`) and its on-screen test (`main+0xab5658`, ±960 × ±540) work from that result.
+   - **Cost:** 2–3 calls a frame in the field, 0.007–0.010 ms a frame in the interpreter (3.4–4.3 µs a call).
 
 ## Limits (option B)
 
 - **The HUD and menus stay in the middle 16:9.** They are not anchored to the screen's edges.
-- **World-anchored 2D drifts toward the middle.** Speech bubbles, "i" and "This way!" markers over objects near the sides are placed by the game for 16:9, and are cut at the edge of the middle 16:9.
+- **No markers over objects in the side areas.** Markers sit over their objects in the middle 16:9 (6), but the game's on-screen test hides those beyond it, and the 2D is drawn into the middle 16:9.
+  - Showing them needs that test widened and the squeeze made a transform over a wider viewport, so 2D beyond ±960 lands in the sides while the HUD stays centred. About 1–2 days; waits until a player asks.
 - **Movies are not checked.** MV01 and MV02 play later in the story (not reached from the new-game opening). If they are drawn as a 2D quad they are pillarboxed like the menus.
 - **The Resolution list and the launcher are unchanged:** 16:9 sizes, Default by height. The F1 note "the picture is stretched to fill your window" stays true.
 - **32:9** works the same way (f = 0.5), with the HUD in the middle half. Not checked.
@@ -60,3 +70,12 @@ Off by default. On a 21:9 (or wider) window or monitor, the game's 3D view fills
 - **In the game** (3440x1440 window, drawn at 3440x1935, RTX 4070 Ti, 60 fps), 2026-11-07:
   - 2.0.1: the village, the bag, the menu and map, photo mode and the album; an interior (the cave of the wasteland); a story cutscene (Tangrowth's overview of the wasteland); the new-game opening and character creation.
   - 1.0.5: the field, the menu, the camera menu (bars), photo mode and the album photo.
+- **Markers** (32:9 window at 1600x450, RTX 4070 Ti, 2026-11-09), each with the hook off and on:
+  - 2.0.1 (the downloaded 1.4.0 game): a speech bubble over a Pokémon 140 px left of the window's middle.
+    - Off: the bubble's tail is 77 px from the middle.
+    - On: 150 px, over the Pokémon, where the game's 16:9 view puts it.
+  - 1.0.5: an "i" over a terminal 78 px from the middle.
+    - Off: 43 px.
+    - On: 85 px, over the terminal.
+  - 0 validation errors, 60 fps.
+  - Not checked yet: photo mode with markers on screen, and 21:9.

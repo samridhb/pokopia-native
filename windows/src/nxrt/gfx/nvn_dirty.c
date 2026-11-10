@@ -38,7 +38,8 @@ enum { BLK_SHIFT = 10, BLK = 1 << BLK_SHIFT, NBLK = 256, MAX_RANGE = BLK * NBLK 
 // So: "is this texture tracked" looks for a range that holds its whole span; a fault / host pre-write unprotects and stamps every range covering that page; pool destruction identifies its range by the pool's exact start mem.
 // (Previously the first range containing the address was always taken: two SMBW ASTC 6x5 textures whose pool's first page is shared with a small preceding pool were judged untracked and re-uploaded on every use, about 6 MB per frame)
 typedef struct { uintptr_t base, end, mem; _Atomic uint8_t *state; _Atomic uint64_t *gen; size_t cap; _Atomic int live;
-                 _Atomic int k; _Atomic int64_t kn; uintptr_t klo, khi; _Atomic uint64_t hv; } range_t;   // the kernel tracks it (Linux, below): protected pages, their extent, the submission last harvested
+                 _Atomic int k; _Atomic int64_t kn; uintptr_t klo, khi; _Atomic uint64_t hv;
+                 _Atomic uint64_t writes; } range_t;   // writes: generation changes (a page written, or counted as written), for nvn_dirty_span_writes   // the kernel tracks it (Linux, below): protected pages, their extent, the submission last harvested
 static _Atomic(range_t *) g_blk[NBLK];
 static inline range_t *rg(int i) { return &atomic_load_explicit(&g_blk[i >> BLK_SHIFT], memory_order_acquire)[i & (BLK - 1)]; }
 static _Atomic int g_nr;
@@ -127,7 +128,7 @@ static void k_unregister(range_t *r) {
 static int k_release(range_t *r, uintptr_t p, uint64_t g) {   // a protected page written: written at g, protected no more (as after a fault)
     uint8_t st = PG_PROT;
     if (!atomic_compare_exchange_strong(&r->state[p], &st, PG_NONE)) return 0;
-    atomic_store(&r->gen[p], g); atomic_fetch_sub(&r->kn, 1);
+    atomic_store(&r->gen[p], g); atomic_fetch_add(&r->writes, 1); atomic_fetch_sub(&r->kn, 1);
     return 1;
 }
 static void k_fail(range_t *r, const char *what) {   // under g_slot_mu: back to signals, every protected page counting as written
@@ -208,7 +209,7 @@ static range_t *find_span(uintptr_t a, size_t len) {
     return NULL;
 }
 static void stamp_page(range_t *r, uintptr_t p) {
-    atomic_store(&r->gen[p], atomic_fetch_add(&g_now, 1) + 1);
+    atomic_store(&r->gen[p], atomic_fetch_add(&g_now, 1) + 1); atomic_fetch_add(&r->writes, 1);
     // Publish completion after the generation: a checker may have cached "clean" using the incremented clock before the generation store. Both fault and host-write paths
     // must invalidate that cached clock, as the page stays writable until the next upload protects it again.
     atomic_fetch_add(&g_now, 1);
@@ -234,13 +235,31 @@ static int page_wp(void *addr) {
     for (int i = 0; i < n; i++) { range_t *r = rg(i); if (live_at(i) && !atomic_load(&r->k) && a >= r->base && a < r->end && atomic_load(&r->state[(a - r->base) >> g_shift]) != PG_NONE) return 1; }
     return 0;
 }
+// Diagnosis (nvn_dirty_fault_where): faults counted by range slot and MB into it, for the first 16 slots and 4 GB of each (atomic adds only: the fault path)
+enum { FW_SLOTS = 16, FW_MB = 4096 };
+static _Atomic uint32_t g_fw[FW_SLOTS][FW_MB]; static _Atomic int g_fw_on;
 static int on_fault(void *addr, int is_write, void *uc) {
     (void)uc;
     if (!is_write) return 0;
     uintptr_t a = (uintptr_t)addr; int ours = 0, n = atomic_load(&g_nr);
     for (int i = 0; i < n; i++)   // Every range sharing the page must be released: releasing only one leaves the other range's state at "protected", and later writes no longer fault and are missed
-        { range_t *r = rg(i); if (live_at(i) && !atomic_load(&r->k) && a >= r->base && a < r->end) ours |= release_page(r, (a - r->base) >> g_shift, &g_faults); }   // the kernel's ranges never fault
+        { range_t *r = rg(i); if (live_at(i) && !atomic_load(&r->k) && a >= r->base && a < r->end) {
+            int took = release_page(r, (a - r->base) >> g_shift, &g_faults); ours |= took;   // the kernel's ranges never fault
+            if (took && atomic_load_explicit(&g_fw_on, memory_order_relaxed) && i < FW_SLOTS && ((a - r->base) >> 20) < FW_MB) atomic_fetch_add_explicit(&g_fw[i][(a - r->base) >> 20], 1, memory_order_relaxed); } }
     return ours;
+}
+void nvn_dirty_fault_where_on(void) { atomic_store(&g_fw_on, 1); }
+// The MBs that faulted most since the last call (counts per MB, cleared), as "range <base>+<MB>: <faults>" items into out
+void nvn_dirty_fault_where(char *out, size_t cap, uint64_t frames) {
+    struct { int s; uint32_t mb, n; } top[8] = {{0}}; int nt = 0; size_t o = 0; out[0] = 0;
+    for (int s = 0; s < FW_SLOTS; s++) for (uint32_t mb = 0; mb < FW_MB; mb++) {
+        uint32_t c = atomic_exchange_explicit(&g_fw[s][mb], 0, memory_order_relaxed); if (!c) continue;
+        int k = nt < 8 ? nt++ : 7; if (k == 7 && nt == 8 && top[7].n >= c) continue;
+        top[k].s = s; top[k].mb = mb; top[k].n = c;
+        for (; k > 0 && top[k].n > top[k - 1].n; k--) { __typeof__(top[0]) t = top[k]; top[k] = top[k - 1]; top[k - 1] = t; }
+    }
+    for (int k = 0; k < nt && o + 64 < cap; k++)
+        o += (size_t)snprintf(out + o, cap - o, "%s%p+%u MB: %.1f", k ? ", " : "", (void *)rg(top[k].s)->base, top[k].mb, (double)top[k].n / (double)(frames ? frames : 1));
 }
 // Unprotect pages p..q of a range with one mprotect per run of protected pages (a host write over a whole texture, e.g. WriteTexels, used to make one system call per 16 KB page:
 // Link's Awakening, about 275 a frame). Pages another thread is changing are handled one by one after the run so far is finished, so no BUSY page is held while waiting
@@ -340,13 +359,20 @@ int nvn_dirty_tracked(const void *addr, size_t len) {
 }
 // The tracked range holding [addr, addr+len), as a handle a caller keeps (packaged textures: the scan over every range ran twice per texture lookup). NULL = untracked
 const void *nvn_dirty_span(const void *addr, size_t len) { return len ? find_span((uintptr_t)addr, len) : NULL; }
+// How many times a page of the span's range has been written (or counted as written) so far: unchanged means no page of it is newer than before.
+// 0 = unknown (no range, or one the kernel tracks: its writes are seen only when harvested)
+uint64_t nvn_dirty_span_writes(const void *span) {
+    const range_t *r = (const range_t *)span;
+    if (!r || !atomic_load_explicit(&r->live, memory_order_acquire) || atomic_load(&r->k)) return 0;
+    return atomic_load(&r->writes) + 1;
+}
 static void mark_prot(range_t *r, uintptr_t k0, uintptr_t k1) {   // pages [k0, k1) now read-only: a page that counted as always written counts as written now
     for (uintptr_t k = k0; k < k1; k++) {
-        if (atomic_load(&r->gen[k]) == UINT64_MAX) atomic_store(&r->gen[k], atomic_fetch_add(&g_now, 1) + 1);
+        if (atomic_load(&r->gen[k]) == UINT64_MAX) { atomic_store(&r->gen[k], atomic_fetch_add(&g_now, 1) + 1); atomic_fetch_add(&r->writes, 1); }
         atomic_store(&r->state[k], PG_PROT);
     }
 }
-static void mark_open(range_t *r, uintptr_t k0, uintptr_t k1) { for (uintptr_t k = k0; k < k1; k++) { atomic_store(&r->gen[k], UINT64_MAX); atomic_store(&r->state[k], PG_NONE); } }
+static void mark_open(range_t *r, uintptr_t k0, uintptr_t k1) { for (uintptr_t k = k0; k < k1; k++) { atomic_store(&r->gen[k], UINT64_MAX); atomic_store(&r->state[k], PG_NONE); } atomic_fetch_add(&r->writes, 1); }
 // Windows refused a run: part of it is not committed (the heap commits 1 MB chunks lazily, and a texture's storage can span one the game has not touched; #27: three
 // 4 MB textures with a 2 MB hole each). Its committed regions are protected one by one and only the rest stays writable and counts as always written: a write there
 // commits its chunk first, unseen, so it must count as written, and a later protect tracks it from then on. The whole run used to count as always written

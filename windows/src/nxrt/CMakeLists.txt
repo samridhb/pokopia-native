@@ -110,6 +110,8 @@ if(WIN32)
   set_tests_properties(scripts.play_defaults PROPERTIES SKIP_RETURN_CODE 77)
   # Split screen: the second player's save (scripts/splitsave.ps1, docs/split-screen.md)
   add_test(NAME scripts.split_save COMMAND powershell -NoProfile -ExecutionPolicy Bypass -File ${CMAKE_SOURCE_DIR}/scripts/test_splitsave.ps1 -Repo ${CMAKE_SOURCE_DIR})
+  # The launcher's update check against stand-in releases (nothing asks GitHub)
+  add_test(NAME scripts.update_check COMMAND powershell -NoProfile -ExecutionPolicy Bypass -File ${CMAKE_SOURCE_DIR}/scripts/test_update.ps1 -Repo ${CMAKE_SOURCE_DIR})
 endif()
 # Co-op step 1b: the hooks route to the coop module (off: the offline answers; host / join: a node through the hooks with one made directly), one process each
 nxrt_executable(nxrt-tests-coop tests/test_coop.c)

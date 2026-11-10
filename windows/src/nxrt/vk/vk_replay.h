@@ -32,8 +32,10 @@ typedef struct {
     uint64_t handles, records, draws, draws_skipped, dispatches, passes, clears, copies, tex_copies, updates, fills, barriers, queries, bad;
     uint64_t skip_no_shader, skip_no_pipeline, skip_no_target, skip_state, inexact_vertex, skip_named;   // skip_named: draws and dispatches NXRT_VK_SKIP left out
     uint64_t desc_sets, writebacks, scaled_sets, sets_reused;   // scaled_sets: with their own support buffer (F-5 render scales); sets_reused: bound again (same content)
+    uint64_t binds_kept, vin_kept;   // descriptor set binds and vertex inputs left as the draw before had them (the dynamic-state cache)
 } vkr_stats_t;
 void vkr_stats(vkr_stats_t *s);
+uint64_t vkr_gpu_ns_total(void);   // GPU time so far, from the timestamps around each submission (F1's Detailed counter)
 void vkr_frame(uint64_t frame);              // per present: statistics every 300 frames
 void vkr_passdump_next(long n);              // DM_CTL passdump: the next n frames as NXRT_VK_PASSDUMP logs them; any thread
 void vkr_texdump_next(void);                 // DM_CTL texdump: the next frame's images as NXRT_VK_TEXDUMP writes them; any thread

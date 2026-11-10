@@ -9,17 +9,19 @@
 # save. --work holds the shader and pipeline cache, temp files and the logs (default ${XDG_CACHE_HOME:-~/.cache}/pokopia-native). nxrt runs a few nice steps down.
 # Link Play (docs/coop-step1c.md, coop-step1d.md): Linux finds no hosts on its own yet, so playing with someone on this network is "join by address"
 # (--join <the host's address>) or hosting (--link-play: others join this PC). --internet plays across the internet with a room code (--room), --relay through a
-# relay you trust. With --config (or --ask) and no Link Play switch, a choice comes first (zenity or kdialog when the desktop has one, else this terminal),
-# remembered in ${XDG_CONFIG_HOME:-~/.config}/pokopia-native/linkplay.json; POKOPIA_ASK=1 brings it back after "don't ask again".
+# relay you trust. With --config (or --ask) and no Link Play switch, a choice comes first: the launcher window (the build's installer/linux/play_window.py),
+# else zenity or kdialog when the desktop has one, else this terminal; remembered in ${XDG_CONFIG_HOME:-~/.config}/pokopia-native/linkplay.json, and
+# POKOPIA_ASK=1 brings it back after "don't ask again". Once a day it asks GitHub whether a newer Pokopia Native is out (the window's "Check for
+# updates" switch, or "check": false in ~/.local/share/pokopia-native/updates.json, turns that off).
 # --interact turns on "Interact everywhere" (experimental, docs/coop-interact.md): Link Play visitors can use moves and items and build in every town, not
 # only Palette Town. Every player in a session needs it on. --story turns on "Story co-op" (experimental, docs/story-coop.md) on top of it: a visitor
 # talks to the town's NPCs as the host does; every player needs it on too. The keyboard's keys: ${XDG_CONFIG_HOME:-~/.config}/pokopia-native/controls.json,
 # as the Windows window's Controls tab writes it (an action's SDL scancode; front_map.h), handed to the game as DM_KEYMAP. The picture: display.json beside it
-# (console mode, the size the game draws at, window or full screen, upscaling, 30 fps, vsync, the FPS counter), applied with --config or --ask, a switch or
+# (console mode, the size the game draws at, window or full screen, upscaling, a frame rate cap, vsync, the FPS counter), applied with --config or --ask, a switch or
 # variable from outside winning. In the game, F1 (or a controller's Minus + Plus) changes the same settings and saves them there (docs/in-game-menu.md).
 set -euo pipefail
 die() { echo "play.sh: $*" >&2; exit 2; }
-EXEFS= GAME= ROMFS= SAVE= WORK= EXE= CONFIG= SHADERS= SHADER_BUILD= SHADER_TOOL= PYTHON= INSTALLER= SPIRV_TOOLS= FONTS= SEED= WINDOW=
+EXEFS= GAME= ROMFS= SAVE= WORK= EXE= CONFIG= SHADERS= SHADER_BUILD= SHADER_TOOL= PYTHON= INSTALLER= SPIRV_TOOLS= FONTS= SEED= WINDOW= VERSION= GAMEVER=
 SILENT= FULLSCREEN= ASK= LINKPLAY= JOIN= INTERNET= ROOM= RELAY= PADCHECK= DRYRUN= NEWSAVE= INTERACT= STORY= NOSAVE= mode=
 while [ $# -gt 0 ]; do
   a=$1; shift
@@ -31,7 +33,7 @@ while [ $# -gt 0 ]; do
     --silent) SILENT=1 ;; --fullscreen) FULLSCREEN=1 ;; --ask) ASK=1 ;; --link-play) LINKPLAY=1 ;; --join) JOIN=$1; shift ;;
     --internet) INTERNET=1 ;; --room) ROOM=$1; shift ;; --relay) RELAY=$1; shift ;; --pad-check) PADCHECK=1 ;; --dry-run) DRYRUN=1 ;; --interact) INTERACT=1 ;;
     --story) STORY=1 ;;
-    -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,22p' "$0"; exit 0 ;;
     *) die "unknown switch $a (play.sh --help)" ;;
   esac
 done
@@ -53,11 +55,13 @@ for key, var in (('exefs', 'C_EXEFS'), ('game', 'C_GAME'), ('romfs', 'C_ROMFS'),
                  ('shader_build', 'C_SHADER_BUILD'), ('shader_tool', 'C_SHADER_TOOL'), ('python', 'C_PYTHON'), ('installer', 'C_INSTALLER'),
                  ('spirv_tools', 'C_SPIRV_TOOLS'), ('fonts', 'C_FONTS'), ('pipeline_seed', 'C_SEED'), ('dotnet', 'C_DOTNET'), ('dlc', 'C_DLC')):
     print(f'{var}={shlex.quote(p(c.get(key)))}')
+print(f"C_VERSION={shlex.quote(str(c.get('pokopia_native') or ''))} C_GAMEVER={shlex.quote(str(c.get('game_version') or ''))}")
 EOF
 )"
   : "${EXEFS:=$C_EXEFS}" "${GAME:=$C_GAME}" "${ROMFS:=$C_ROMFS}" "${WORK:=$C_WORK}" "${EXE:=$C_EXE}" "${SHADERS:=$C_SHADERS}"
   : "${SHADER_BUILD:=$C_SHADER_BUILD}" "${SHADER_TOOL:=$C_SHADER_TOOL}" "${PYTHON:=$C_PYTHON}" "${INSTALLER:=$C_INSTALLER}" "${SPIRV_TOOLS:=$C_SPIRV_TOOLS}"
   : "${FONTS:=$C_FONTS}" "${SEED:=$C_SEED}" "${DLC:=$C_DLC}"
+  VERSION=$C_VERSION GAMEVER=$C_GAMEVER
   [ -z "$SAVE" ] && SAVE=$C_SAVE && NEWSAVE=1
   # the .NET the build used (the AppImage's own, or ~/.dotnet): the shader translator runs on it for shaders the game makes in play
   [ -n "$C_DOTNET" ] && [ -x "$C_DOTNET/dotnet" ] && [ -z "${DOTNET_ROOT:-}" ] && export DOTNET_ROOT=$C_DOTNET PATH=$C_DOTNET:$PATH
@@ -86,6 +90,20 @@ ROOMRX='^[0-9A-TV-Za-tv-z]{16}$'   # after dashes and spaces are taken out: Croc
 SETTINGS=${POKOPIA_SETTINGS_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/pokopia-native}   # POKOPIA_SETTINGS_DIR: another folder (tests)
 export NXRT_SETTINGS_DIR=$SETTINGS   # the in-game menu (F1) saves its changes there too
 PREF=$SETTINGS/linkplay.json
+# A Steam Deck (Steam's flag, or Valve's LCD / OLED board); its Game Mode (gamescope) gets no windows or dialogs
+DECK=; [ "${SteamDeck:-}" = 1 ] && DECK=1
+case "$(cat /sys/class/dmi/id/board_vendor 2>/dev/null || true)/$(cat /sys/class/dmi/id/board_name 2>/dev/null || true)" in Valve/Jupiter|Valve/Galileo) DECK=1 ;; esac
+GAMEMODE=; { [ -n "${GAMESCOPE_WAYLAND_DISPLAY:-}" ] || [ "${XDG_CURRENT_DESKTOP:-}" = gamescope ]; } && GAMEMODE=1
+WINDOW_PY=; [ -n "$INSTALLER" ] && [ -f "$INSTALLER/linux/play_window.py" ] && WINDOW_PY=$INSTALLER/linux/play_window.py
+play_window() {   # the launcher window (launch | notice | room ...): its exit code (0 play, 10 cancelled); 11 when no window can open here
+  [ -n "$WINDOW_PY" ] && [ -n "$PY" ] || return 11
+  local tkx r=0; tkx=$(dirname "$PY")/../lib/tk-xft/libtcl9tk9.0.so   # the builder's Tk with Xft (the desktop's fonts), as its own window takes it
+  if [ -f "$tkx" ] && [ "${POKOPIA_TK:-}" != x11 ]; then
+    LD_PRELOAD="$tkx${LD_PRELOAD:+ $LD_PRELOAD}" POKOPIA_TK_XFT=$tkx "$PY" -I "$WINDOW_PY" "$@" || r=$?
+    case $r in 0|10|11) return $r ;; esac   # that Tk failed here: the bundled one
+  fi
+  r=0; "$PY" -I "$WINDOW_PY" "$@" || r=$?; return $r
+}
 pref_get() { [ -f "$PREF" ] && "$PY" -I -c 'import json,sys; v=json.load(open(sys.argv[1])).get(sys.argv[2]); print("" if v is None else (str(v).lower() if isinstance(v,bool) else v))' "$PREF" "$1" 2>/dev/null || true; }
 pref_put() {   # key=value ...
   mkdir -p "$(dirname "$PREF")"
@@ -128,10 +146,19 @@ choose_mode() {   # the last mode -> the new one (alone, host, join, inet-host, 
   fi
 }
 
+WIN_RC=11   # the launcher window: 0 when it was shown and saved the choice
 if { [ -n "$CONFIG" ] || [ -n "$ASK" ]; } && [ -z "$LINKPLAY$JOIN$INTERNET$ROOM$RELAY${DM_COOP:-}$DRYRUN" ] && [ -n "$PY" ]; then
   mode=$(pref_get mode); mode=${mode:-alone}
-  GAMEMODE=; { [ -n "${GAMESCOPE_WAYLAND_DISPLAY:-}" ] || [ "${XDG_CURRENT_DESKTOP:-}" = gamescope ]; } && GAMEMODE=1   # the Steam Deck's Game Mode: no dialogs
-  if { [ "$(pref_get ask)" != "false" ] || [ -n "${POKOPIA_ASK:-}" ]; } && [ -z "$GAMEMODE" ]; then
+  ASKNOW=; { [ "$(pref_get ask)" != "false" ] || [ -n "${POKOPIA_ASK:-}" ]; } && [ -z "$GAMEMODE" ] && ASKNOW=1
+  if [ -n "$ASKNOW" ]; then
+    WIN_ARGS=(launch --settings "$SETTINGS" --installed "$VERSION" --game-version "$GAMEVER" --coop-needs "$COOP_NEEDS" --coop-game "$COOP_GAME"
+              --console-default "$([ -n "$DECK" ] && echo 0 || echo 1)")
+    [ -n "$COOP_OK" ] && WIN_ARGS+=(--coop-ok); [ -n "$NOSAVE" ] && WIN_ARGS+=(--no-save); [ -n "$DECK" ] && WIN_ARGS+=(--deck)
+    WIN_RC=0; play_window "${WIN_ARGS[@]}" || WIN_RC=$?
+    [ "$WIN_RC" = 10 ] && { echo "cancelled"; exit 0; }
+    [ "$WIN_RC" = 0 ] && { mode=$(pref_get mode); mode=${mode:-alone}; }
+  fi
+  if [ -n "$ASKNOW" ] && [ "$WIN_RC" != 0 ]; then   # no window here: the desktop's dialogs, else this terminal
     mode=$(choose_mode "$mode"); [ -n "$mode" ] || { echo "cancelled"; exit 0; }
     if [ "$mode" = join ] || [ "$mode" = inet-visit ]; then
       JOIN=$(ask_text "Pokopia - Link Play" "The host's address (for example 192.168.1.20)" "$(pref_get join)"); [ -n "$JOIN" ] || { echo "cancelled"; exit 0; }
@@ -200,8 +227,11 @@ if [ -n "$LINKPLAY" ]; then
     if [ -n "$RELAY" ]; then echo "Through the relay $RELAY: every player needs this code and the relay's address."
     elif [ -z "$JOIN" ]; then echo "Visitors need this code and this computer's internet address; your router must forward port 47600 (TCP and UDP) here."; fi
     echo "Nothing is encrypted: anyone on the way can read the game's traffic."
-    if [ -z "$JOIN" ] && [ -z "$DRYRUN" ] && [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && command -v zenity >/dev/null; then
-      zenity --info --title "Pokopia - your room code" --no-wrap --text "Your room code for this session:\n\n<big><b>$DM_COOP_ROOM</b></big>\n\nGive it to the players who visit." 2>/dev/null || true
+    if [ -z "$JOIN" ] && [ -z "$DRYRUN" ] && [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
+      r=11; [ -z "$GAMEMODE" ] && { r=0; play_window room "$DM_COOP_ROOM" || r=$?; }
+      if [ "$r" = 11 ] && command -v zenity >/dev/null; then
+        zenity --info --title "Pokopia - your room code" --no-wrap --text "Your room code for this session:\n\n<big><b>$DM_COOP_ROOM</b></big>\n\nGive it to the players who visit." 2>/dev/null || true
+      fi
     fi
   fi
   echo
@@ -213,14 +243,15 @@ CACHE=$WORK/cache TEMP=$WORK/temp LOGS=$WORK/logs
 export NXRT_VK_CACHE_DIR=$CACHE
 export DM_AUDIO=$([ -n "$SILENT" ] && echo 0 || echo 1)
 if [ -n "$CONFIG$ASK" ]; then   # the picture, saved for this computer (display.json); a switch or variable given from outside wins
-  # A Steam Deck (Steam's flag, or Valve's LCD / OLED board) starts in the game's handheld mode, its lighter settings (24 % less GPU time measured),
-  # until the player picks docked or handheld in F1 -> Graphics (display.json then holds "console")
-  DECK=; [ "${SteamDeck:-}" = 1 ] && DECK=1
-  case "$(cat /sys/class/dmi/id/board_vendor 2>/dev/null || true)/$(cat /sys/class/dmi/id/board_name 2>/dev/null || true)" in Valve/Jupiter|Valve/Galileo) DECK=1 ;; esac
-  D_CONSOLE=$([ -n "$DECK" ] && echo 0 || echo 1) D_RES=default D_FULL=false D_WIN=1280x720 D_UPSCALE=sharp D_SHARP=0.5 D_FPS=60 D_VSYNC=true D_COUNTER=off
-  [ -n "$PY" ] && eval "$("$PY" -I - "$SETTINGS/display.json" "$D_CONSOLE" <<'EOF'
+  # A Steam Deck starts in the game's handheld mode, its lighter settings (24 % less GPU time measured), until the player picks docked or
+  # handheld (the launcher window, or F1 -> Graphics: display.json then holds "console"). It draws at its screen's 1280x720 (not the game's 1080p
+  # shrunk to it: a quarter less GPU work) with FXAA instead of SMAA, until the player picks a resolution or anti-aliasing
+  D_CONSOLE=$([ -n "$DECK" ] && echo 0 || echo 1) D_RES=default D_FULL=false D_WIN=1280x720 D_UPSCALE=sharp D_SHARP=0.5 D_FPS=60 D_VSYNC=true D_COUNTER=off D_AA=smaa D_WIDE=false
+  [ -n "$DECK" ] && D_RES=1280x720 D_AA=fxaa
+  [ -n "$PY" ] && eval "$("$PY" -I - "$SETTINGS/display.json" "$D_CONSOLE" "$D_RES" "$D_AA" <<'EOF'
 import json, re, shlex, sys
-d = {'console': int(sys.argv[2]), 'resolution': 'default', 'fullscreen': False, 'window': '1280x720', 'upscale': 'sharp', 'sharpness': 5, 'fps': 60, 'vsync': True, 'fps_counter': 'off'}
+d = {'console': int(sys.argv[2]), 'resolution': sys.argv[3], 'fullscreen': False, 'window': '1280x720', 'upscale': 'sharp', 'sharpness': 5, 'fps': 60, 'vsync': True, 'fps_counter': 'off',
+     'antialiasing': sys.argv[4], 'wide_view': False}
 try: d.update({k: v for k, v in json.load(open(sys.argv[1], encoding='utf-8')).items() if k in d})
 except Exception: pass
 def num(v, dflt):
@@ -233,7 +264,8 @@ if r != 'default' and not re.fullmatch(r'\d+x\d+', r):
     h = round(1080 * f); r = f'{round(h * 16 / 9)}x{h}' if f >= 1 else 'default'
 for var, v in (('D_CONSOLE', num(d['console'], int(sys.argv[2]))), ('D_RES', r), ('D_FULL', 'true' if d['fullscreen'] else 'false'), ('D_WIN', d['window'] or ''),
                ('D_UPSCALE', d['upscale']), ('D_SHARP', f"{num(d['sharpness'], 5) / 10:g}"), ('D_FPS', num(d['fps'], 60)),
-               ('D_VSYNC', 'true' if d['vsync'] else 'false'), ('D_COUNTER', d['fps_counter'] if d['fps_counter'] in ('off', 'corner', 'detailed') else 'off')):
+               ('D_VSYNC', 'true' if d['vsync'] else 'false'), ('D_COUNTER', d['fps_counter'] if d['fps_counter'] in ('off', 'corner', 'detailed') else 'off'),
+               ('D_AA', d['antialiasing'] if d['antialiasing'] in ('off', 'fxaa', 'smaa') else sys.argv[4]), ('D_WIDE', 'true' if d['wide_view'] is True else 'false')):
     print(f'{var}={shlex.quote(str(v))}')
 EOF
 )"
@@ -243,9 +275,11 @@ EOF
   if [ -z "$WINDOW$FULLSCREEN${NXRT_VK_WINDOW:-}${NXRT_VK_FULLSCREEN:-}" ]; then [ "$D_FULL" = true ] && FULLSCREEN=1 || WINDOW=$D_WIN; fi
   [ -z "${NXRT_VK_UPSCALE:-}" ] && export NXRT_VK_UPSCALE=$D_UPSCALE
   [ -z "${NXRT_VK_SHARPNESS:-}" ] && export NXRT_VK_SHARPNESS=$D_SHARP
-  [ -z "${DM_FPS:-}" ] && [ "$D_FPS" = 30 ] && export DM_FPS=30
+  [ -z "${DM_FPS:-}" ] && case $D_FPS in 30|40|45|50) export DM_FPS=$D_FPS ;; esac   # a cap below 60 (40 even on 120 Hz screens)
   [ -z "${NXRT_VK_PRESENT:-}" ] && [ "$D_VSYNC" = false ] && export NXRT_VK_PRESENT=mailbox
   [ -z "${NXRT_FPS_COUNTER:-}" ] && [ "$D_COUNTER" != off ] && export NXRT_FPS_COUNTER=$D_COUNTER
+  [ -z "${NXRT_VK_AA:-}" ] && export NXRT_VK_AA=$D_AA   # what F1 or the window last chose (the game's own start is SMAA)
+  [ -z "${NXRT_VK_WIDE:-}" ] && [ "$D_WIDE" = true ] && export NXRT_VK_WIDE=1
 fi
 [ -n "$WINDOW" ] && export NXRT_VK_WINDOW=$WINDOW
 [ -n "$FULLSCREEN" ] && export NXRT_VK_FULLSCREEN=1
@@ -282,8 +316,15 @@ if [ -n "$DRYRUN" ]; then
   [ -n "${DM_KEYMAP:-}" ] && echo "keys: DM_KEYMAP=$DM_KEYMAP"
   echo "display: DM_OPMODE=${DM_OPMODE:-} NXRT_VK_SCALE=${NXRT_VK_SCALE:-} NXRT_VK_RESOLUTION=${NXRT_VK_RESOLUTION:-} NXRT_VK_WINDOW=${NXRT_VK_WINDOW:-}" \
        "NXRT_VK_FULLSCREEN=${NXRT_VK_FULLSCREEN:-} NXRT_VK_UPSCALE=${NXRT_VK_UPSCALE:-} NXRT_VK_SHARPNESS=${NXRT_VK_SHARPNESS:-} DM_FPS=${DM_FPS:-}" \
-       "NXRT_VK_PRESENT=${NXRT_VK_PRESENT:-} NXRT_FPS_COUNTER=${NXRT_FPS_COUNTER:-} NXRT_SETTINGS_DIR=$NXRT_SETTINGS_DIR"
+       "NXRT_VK_PRESENT=${NXRT_VK_PRESENT:-} NXRT_FPS_COUNTER=${NXRT_FPS_COUNTER:-} NXRT_VK_AA=${NXRT_VK_AA:-} NXRT_VK_WIDE=${NXRT_VK_WIDE:-}" \
+       "NXRT_SETTINGS_DIR=$NXRT_SETTINGS_DIR"
   exit 0
+fi
+# The once-a-day update check, beside the game's start and never in its way (3 s at most): a newer release in a small window of its own, or one
+# line here in Game Mode or without a desktop. A check the window already made today asks nothing.
+if [ -n "$WINDOW_PY" ] && [ -n "$VERSION" ]; then
+  q=; { [ -n "$GAMEMODE" ] || [ -z "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; } && q=--quiet
+  ( play_window notice --installed "$VERSION" $q >/dev/null & )
 fi
 echo "Pokopia: keyboard WASD move, mouse look (click the picture; Esc releases the mouse), J/K/U/I = A/B/X/Y, Return = +, Tab = -, F11 fullscreen, F1 the menu."
 echo "Controllers work as Switch controllers (Steam Deck, Xbox / PlayStation / Switch Pro). Save: $SAVE. Logs: $LOGS"

@@ -106,10 +106,37 @@ Two cross-platform sessions through an SSH tunnel (`-L` / `-R` 47600, `DM_COOP_T
 | nxnative's own checks in the patched tree | `test_launcher_settings` (with a new case for the row) and `test_lint_c` OK |
 | the co-op module on the Mac (cc, -Wall -Wextra) | no warnings; 1786 checks, 0 failed (with `interact`) |
 
+## The Spectator Mode text (2026-11-09, Windows and Linux)
+
+With Interact everywhere on, the host in a story area read Spectator Mode wording that is no longer true there. Four more sites
+(`coop_text_sites`, coop_interact.c) answer the game's own checks differently, for 2.0.1 and 1.0.5. They are attached with Interact
+everywhere, but they are not in the mods fingerprint (they change only what this player reads). A site whose instruction differs is left
+out alone; Interact everywhere stays on.
+
+| what the host read | where the game decides (2.0.1; 1.0.5) | now |
+|---|---|---|
+| "When playing with others in this town, everyone will be restricted to playing in Spectator Mode." and "Certain moves and items can't be used while playing in Spectator Mode.", hosting in a story area | after Invite Others to Visit, the stage-type-1 check `main+0xf29bdc` (1.0.5 `main+0xe5417c`) picks the Link Play state: 3, the story area's (these notes), or 4, another town's (straight to the settings) | the check answers no: state 4 |
+| Spectator Mode "On", greyed, in the hosting settings and in Check Settings during the session | the row's refresher `main+0x100e72c` (1.0.5 `main+0xf2996c`): the shown index (`row+0x400`, 0 On, 1 Off) is the save's setting, forced to On outside Palette Town and in the connected screens (`row+0x424` 3 or 5) | "Off" |
+| (state 4 alone would let the row change, and choosing On there says "This Palette Town is currently in Spectator Mode.") | the rows take the state as their context (`main+0x1011018`); the option handler `main+0x1007380` (1.0.5 `main+0xf227a0`) locks the row (`row+0x42b`) outside Palette Town only in the hosting context, 1 (`main+0x10076b4`) | that check gets context 1 in a story area: the row stays locked, as the game has it there |
+
+The row's site writes the shown index through the row pointer, so a port must map guest addresses 1:1 (nxrt does). The Mac and the iPhone
+need their own gates for these sites (not done).
+
+Tested in the game (2.0.1, Withered Wasteland, the host on a save copy, 2026-11-09):
+- No notes; the settings show Spectator Mode "Off". On the row, it greys and Left changes nothing (no Palette Town message).
+- Hosting starts as before ("You're now connected!").
+- Check Settings during the session shows "Off" greyed, and Left gives the game's own "This can't be changed when you're already connected!".
+- The mods fingerprint is unchanged.
+
+1.0.5 has the same sites at its own addresses (found by their instructions) but was not run.
+
 ## Not done, and known gaps
 
-- **Cosmetic:** the visitor's join notices still say everyone will be in Spectator Mode, and the host's settings row still shows
-  Spectator Mode On, greyed. Their decisions are branches, which a gate cannot change.
+- **The visitor's join notice** still says everyone will be in Spectator Mode (state 0x1c of the Link Play screens, `main+0xf2df30`). The same
+  stage-type check also picks the normal join path, which tests whether the visitor has already been to that story area (`main+0xf2e06c`), so
+  answering it differently could turn a visitor away. Skipping only the notice needs the Link Play steps mapped.
+- **"Return Home" during a session** (a player's report: it says travelling isn't possible and that you'll go to the nearest area, then the
+  travel works) is not found yet. A save without a home shows a different message ("You don't have a home ... a safe location nearby?").
 - **The Link Play menu** still treats the host as a spectator in story areas (`main+0xe7a878`, UI only): "Get Friends' Stuff" was greyed.
 - **Items go home:** leaving, a visitor's bag goes to its own PC ("All the items you have will be kept in the PC"): in a story area a
   visitor can now carry the host's parts home, as in Palette Town. Not tested: whether story objects can be picked up.

@@ -152,14 +152,16 @@ uint64_t nxrt_host_to_guest(uint64_t host, uint64_t *off) {
 void nxw_interp_trampoline(NxwGuestCpu *cpu);   /* src/interp */
 typedef void (*NxwInterpSiteHook)(uint64_t pc, uint64_t *x);
 void nxw_interp_set_site_hook(NxwInterpSiteHook hook, uint64_t lo, uint64_t hi);
-static coop_site g_isite[8]; static int g_nisite; static uint64_t g_isite_base;
+static coop_site g_isite[16]; static int g_nisite; static uint64_t g_isite_base;
 static void interact_hook(uint64_t pc, uint64_t *x) {
-    static _Atomic int said, said_talk;
+    static _Atomic int said, said_talk, said_notes, said_row;
     for (int i = 0; i < g_nisite; i++) {
         if (pc != g_isite_base + g_isite[i].off) continue;
-        uint64_t was13 = x[13], was0 = x[0]; coop_interact_site(g_isite[i].id, x);
+        uint64_t was13 = x[13], was0 = x[0], was8 = x[8]; coop_interact_site(g_isite[i].id, x);
         if (x[13] != was13 && !atomic_exchange(&said, 1)) LOG("[coop] Interact everywhere: this story area's Link Play session has Palette Town's permissions");
         if (g_isite[i].id == COOP_SITE_TALK && x[0] != was0 && !atomic_exchange(&said_talk, 1)) LOG("[coop] Story co-op: a visitor's talk takes the host's path");
+        if (g_isite[i].id == COOP_SITE_STAGEONE && x[0] != was0 && !atomic_exchange(&said_notes, 1)) LOG("[coop] Interact everywhere: hosting here skips the Spectator Mode notes");
+        if (g_isite[i].id == COOP_SITE_SPECROW && x[8] != was8 && !atomic_exchange(&said_row, 1)) LOG("[coop] Interact everywhere: the settings show Spectator Mode Off here");
     }
 }
 /* ---- Wide view (NXRT_VK_WIDE=1, experimental): the game builds 16:9 into its cameras (main+0x1f12368 stores the aspect at +0x14c) and every perspective
@@ -181,8 +183,34 @@ static void wide_hook(uint64_t *x) {
         *p = a;
     }
 }
+// Markers over their objects (speech bubbles, "i", "This way!"): the game's world-to-screen (2.0.1 main+0x10fc06c, 1.0.5 main+0x100c60c) maps a world point
+// through a view's view-projection to 1920x1080 pixels at its out pointer x1. With the wide camera that is the point's widened position, which the 2D squeeze
+// then pulls toward the middle again; at its ret the x is put where the squeeze brings it back over the point: 960 + (x - 960) / f, f = 16:9 / the camera's
+// aspect. On with the wide view; NXRT_WIDE_W2S=0 leaves it (docs/wide-view.md)
+typedef struct { const char *build; uint32_t fn, w_fn, ret; } w2s_site;
+static const w2s_site g_w2s_sites[] = {{"76a489f3bd3642fa", 0x10fc06c, 0x93401c48u, 0x10fc128},   // sxtb x8, w2 at the entry; ret after the pixels are stored
+                                       {"816c5358e8178d80", 0x100c60c, 0x93401c48u, 0x100c6c8}};  // 1.0.5: the same function (found by its words; one match)
+static uint64_t g_w2s_pc, g_w2s_entry; static _Atomic uint64_t g_w2s_calls, g_w2s_ns; static __thread uint64_t t_w2s_t0;
+uint64_t nxrt_nvn_presents(void);
+static void w2s_hook(uint64_t *x) {
+    float a = g_nxrt_wide_aspect; uint64_t n = atomic_fetch_add(&g_w2s_calls, 1) + 1;
+    if (t_w2s_t0) { atomic_fetch_add(&g_w2s_ns, now_ns() - t_w2s_t0); t_w2s_t0 = 0; }
+    static _Atomic uint64_t next = 600, calls0, ns0; uint64_t fr = nxrt_nvn_presents(), at = atomic_load(&next);
+    if (fr >= at && atomic_compare_exchange_strong(&next, &at, fr + 600)) {   // the cost: calls and time in the interpreter a frame, over the last 600 or so frames
+        uint64_t c = atomic_load(&g_w2s_calls), ns = atomic_load(&g_w2s_ns), dc = c - atomic_exchange(&calls0, c), dn = ns - atomic_exchange(&ns0, ns);
+        LOG("wide view: world-to-screen up to frame %llu: %.1f calls a frame, %.3f ms a frame in the interpreter (%.2f us a call)", (unsigned long long)fr, dc / 600.0,
+            dn / 600.0 / 1e6, dc ? dn / (double)dc / 1e3 : 0.0);
+    }
+    if (!(a > 0) || fabsf(a - 16.0f / 9.0f) < 1e-3f || !x[1]) return;
+    float f = (16.0f / 9.0f) / a, *p = (float *)(uintptr_t)x[1];
+    p[0] = 960.0f + (p[0] - 960.0f) / f;
+}
 static uint64_t g_hook_lo = UINT64_MAX, g_hook_hi;
-static void site_hooks(uint64_t pc, uint64_t *x) { if (pc == g_wide_pc) wide_hook(x); if (g_nisite) interact_hook(pc, x); }
+static void site_hooks(uint64_t pc, uint64_t *x) {
+    if (pc == g_wide_pc) wide_hook(x);
+    if (pc == g_w2s_entry) t_w2s_t0 = now_ns(); else if (pc == g_w2s_pc) w2s_hook(x);
+    if (g_nisite) interact_hook(pc, x);
+}
 static void site_range(uint64_t lo, uint64_t hi) {   // one callback for every site, over the range that holds them all
     if (lo < g_hook_lo) g_hook_lo = lo;
     if (hi > g_hook_hi) g_hook_hi = hi;
@@ -220,13 +248,18 @@ static void interact_attach(void) {
     const coop_site *si, *ss; int ni = m ? coop_interact_sites(m->build_id, &si) : 0, ns = m && coop_story_on() ? coop_story_sites(m->build_id, &ss) : 0;
     if (!ni) { LOG("[RED] DM_COOP_INTERACT: Interact everywhere has no sites for main %.16s: off", m ? m->build_id : "?"); return; }
     if (coop_story_on() && !ns) LOG("[RED] DM_COOP_STORY: Story co-op has no sites for main %.16s: off", m->build_id);
-    coop_site s[8]; int n = 0;
-    for (int k = 0; k < ni && n < 8; k++) s[n++] = si[k];
-    for (int k = 0; k < ns && n < 8; k++) s[n++] = ss[k];
+    coop_site s[16]; int n = 0;
+    for (int k = 0; k < ni && n < 16; k++) s[n++] = si[k];
+    for (int k = 0; k < ns && n < 16; k++) s[n++] = ss[k];
     uint64_t base = (uint64_t)(uintptr_t)m->base, lo = UINT64_MAX, hi = 0;
     for (int k = 0; k < n; k++) {
         uint32_t w = *(const uint32_t *)(uintptr_t)(base + s[k].off);
         if (w != s[k].word) { LOG("[RED] DM_COOP_INTERACT: main+%#x is %08x, not %08x: off", s[k].off, w, s[k].word); return; }
+    }
+    const coop_site *st; int nt = coop_text_sites(m->build_id, &st);   // the Spectator Mode text: a site that does not match is left out alone
+    for (int k = 0; k < nt && n < 16; k++) {
+        uint32_t w = *(const uint32_t *)(uintptr_t)(base + st[k].off);
+        if (w == st[k].word) s[n++] = st[k]; else LOG("[RED] DM_COOP_INTERACT: main+%#x is %08x, not %08x: \"%s\" left out", st[k].off, w, st[k].word, st[k].what);
     }
     for (int k = 0; k < n; k++) {
         if (interpret_function(base + s[k].fn)) { LOG("[RED] DM_COOP_INTERACT: no translated function at main+%#x: off", s[k].fn); return; }
@@ -252,6 +285,15 @@ static void wide_attach(void) {
     g_wide_pc = base + s->fn;
     site_range(g_wide_pc, g_wide_pc + 4);
     LOG("wide view (experimental): main+%#x builds every camera's projection in the interpreter; 16:9 cameras take the window's aspect", s->fn);
+    const char *ex = getenv("NXRT_WIDE_W2S");
+    if (ex && *ex == '0') { LOG("wide view: markers placed as the game places them (NXRT_WIDE_W2S=0): those off the middle drift toward it"); return; }
+    for (size_t k = 0; k < sizeof g_w2s_sites / sizeof *g_w2s_sites; k++) if (!strncmp(m->build_id, g_w2s_sites[k].build, 16)) {
+        const w2s_site *w2 = &g_w2s_sites[k];
+        if (*(const uint32_t *)(uintptr_t)(base + w2->fn) != w2->w_fn || *(const uint32_t *)(uintptr_t)(base + w2->ret) != 0xd65f03c0u || interpret_function(base + w2->fn)) {
+            LOG("[RED] wide view: main+%#x is not the world-to-screen as expected: markers drift toward the middle", w2->fn); break; }
+        g_w2s_entry = base + w2->fn; g_w2s_pc = base + w2->ret; site_range(g_w2s_entry, g_w2s_pc + 4);
+        LOG("wide view: main+%#x, the world-to-screen, runs in the interpreter with a hook at its ret main+%#x: markers stay over their objects", w2->fn, w2->ret);
+    }
 }
 
 /* The game DLL (the contract in rt_abi.h): its function list fills the table */

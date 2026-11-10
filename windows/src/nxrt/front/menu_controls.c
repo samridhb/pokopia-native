@@ -198,12 +198,12 @@ void ct_draw(mn_list *out, const mn_panel *p, int sel) {
     static const char *const pages[2] = {"Keyboard", "Controller"};
     for (int k = 0; k < 2; k++) {
         float x = p->px + 48 * u + k * (L.pill + 12 * u);
-        mn_rect(out, x, p->y0 + 4 * u, L.pill, L.row_h - 8 * u, (L.row_h - 8 * u) / 2, C.page == k ? (sel == 0 ? C_SEL : RGBA(255, 236, 150, 255)) : sel == 0 ? C_PILL : C_TAB);
-        mn_text(out, pages[k], x + (L.pill - mn_text_w(pages[k], fs)) / 2, p->y0 + (L.row_h - fs) / 2, fs, C.page == k ? C_SELTEXT : C_TEXT);
+        mn_rect(out, x, p->y0 + 4 * u, L.pill, L.row_h - 8 * u, (L.row_h - 8 * u) / 2, C.page == k ? (sel == 0 ? C_SEL : C_CHOSEN) : sel == 0 ? C_PILL : C_TAB);
+        mn_text(out, pages[k], x + (L.pill - mn_text_w(pages[k], fs)) / 2, p->y0 + (L.row_h - fs) / 2, fs, C.page == k ? (sel == 0 ? C_SELTEXT : C_TITLE) : C_TEXT);
     }
     if (C.page) {   // player 1
         float y = L.p1y, vw = p->pw * 0.55f, vx = p->px + p->pw - 48 * u - vw;
-        if (sel == 1) mn_rect(out, p->px + 24 * u, y + 3 * u, p->pw - 48 * u, L.row_h - 6 * u, (L.row_h - 6 * u) / 2, RGBA(255, 244, 196, 255));
+        if (sel == 1) mn_rect(out, p->px + 24 * u, y + 3 * u, p->pw - 48 * u, L.row_h - 6 * u, (L.row_h - 6 * u) / 2, C_HI);
         mn_text(out, "Player 1", p->px + 48 * u, y + (L.row_h - fs) / 2, fs, C_TEXT);
         const char *who = NULL; for (int i = 0; i < C.npads; i++) if (C.pads[i].player == 0) who = C.pads[i].name;
         if (C.capture == CAP_P1) snprintf(v, sizeof v, "press any button on it...");
@@ -220,7 +220,7 @@ void ct_draw(mn_list *out, const mn_panel *p, int sel) {
             mn_text(out, "Reset to defaults", x + (L.colw - mn_text_w("Reset to defaults", fs)) / 2, y + (L.row_h - fs) / 2, fs, on ? C_SELTEXT : C_TEXT);
             continue;
         }
-        if (on) mn_rect(out, x - 8 * u, y + 3 * u, L.colw + 16 * u, L.row_h - 6 * u, (L.row_h - 6 * u) / 2, RGBA(255, 244, 196, 255));
+        if (on) mn_rect(out, x - 8 * u, y + 3 * u, L.colw + 16 * u, L.row_h - 6 * u, (L.row_h - 6 * u) / 2, C_HI);
         mn_text(out, c_label[i], x + 12 * u, y + (L.row_h - fs) / 2, fs, C_TEXT);
         float kw = L.colw * 0.5f, kx = x + L.colw - kw; int waiting = C.capture == i;
         mn_rect(out, kx, y + 7 * u, kw, L.row_h - 14 * u, (L.row_h - 14 * u) / 2, waiting ? C_EDGE : on ? C_SEL : C_PILL);

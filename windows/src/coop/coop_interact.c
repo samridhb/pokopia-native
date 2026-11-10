@@ -40,6 +40,32 @@ static const coop_site g_story[] = {
 };
 static _Atomic int g_role_sites, g_story_host;   // the ROLE site is attached (this build has the host's sites); this player hosts in a story area
 
+// The Spectator Mode text, which Interact everywhere makes untrue in a story area (stage type 1: stages 1-10).
+// - Hosting there, the Link Play screens show "When playing with others in this town, everyone will be restricted to playing in Spectator Mode"
+//   and "Certain moves and items can't be used ..." with the settings: after Invite Others to Visit, the stage-type-1 check (2.0.1 main+0xf29bdc)
+//   picks the Link Play state, 3 (the story area's, with the notes) or 4 (another town's, straight on). STAGEONE, right after the call, answers no.
+//   The settings rows take that state as their context (main+0x1011018), which decides how the Spectator Mode row behaves (below).
+// - The settings row's refresher (2.0.1 main+0x100e72c) shows the save's Spectator Mode setting (row+0x400: 0 On, 1 Off, as the getter wrote it)
+//   and forces "On" outside Palette Town (stage 12), and in the connected screens (row+0x424 3 or 5) everywhere. At SPECROW (cmp w8, #0xc; w8 the
+//   stage, x19 the row) a story area takes Palette Town's path showing "Off"; at SPECROW2 (cmp w9, #3; w9 the screen) that row's screen is not a
+//   forcing one.
+// - The option list's handler (2.0.1 main+0x1007380) locks the Spectator Mode row (row+0x42b) outside Palette Town only in the hosting context (1);
+//   in state 4's it would let the row change, and choosing On there says "This Palette Town is currently in Spectator Mode". SPECLOCK (cmp w8, #1;
+//   w8 the context) gives that check the hosting context in a story area, so the row stays locked, as the game has it there.
+// 1.0.5's functions are the same instruction for instruction (sizes; the refresher's struct offsets too), at other addresses
+static const coop_site g_text[] = {
+    {"76a489f3bd3642fa5e18bd83d32c98ba", 0xf29400, 0xf29be0, 0x7200001fu, COOP_SITE_STAGEONE, "Link Play: no Spectator Mode notes when hosting in a story area"},
+    {"76a489f3bd3642fa5e18bd83d32c98ba", 0x100e72c, 0x100e7cc, 0x7100311fu, COOP_SITE_SPECROW, "Link Play settings: Spectator Mode shows Off in a story area"},
+    {"76a489f3bd3642fa5e18bd83d32c98ba", 0x100e72c, 0x100e7dc, 0x71000d3fu, COOP_SITE_SPECROW2, "Link Play settings: ... in the connected screens too"},
+    {"76a489f3bd3642fa5e18bd83d32c98ba", 0x1007380, 0x10076b4, 0x7100051fu, COOP_SITE_SPECLOCK, "Link Play settings: ... and stays locked there"},
+    {"816c5358e8178d802fcec4a7ce5a741a", 0xe539a0, 0xe54180, 0x7200001fu, COOP_SITE_STAGEONE, "Link Play: no Spectator Mode notes when hosting in a story area"},
+    {"816c5358e8178d802fcec4a7ce5a741a", 0xf2996c, 0xf29a0c, 0x7100311fu, COOP_SITE_SPECROW, "Link Play settings: Spectator Mode shows Off in a story area"},
+    {"816c5358e8178d802fcec4a7ce5a741a", 0xf2996c, 0xf29a1c, 0x71000d3fu, COOP_SITE_SPECROW2, "Link Play settings: ... in the connected screens too"},
+    {"816c5358e8178d802fcec4a7ce5a741a", 0xf227a0, 0xf22ad4, 0x7100051fu, COOP_SITE_SPECLOCK, "Link Play settings: ... and stays locked there"},
+};
+static _Atomic uint64_t g_off_row;   // the row SPECROW showed "Off" in, for SPECROW2 a few instructions later
+static _Atomic int g_spec_story;     // the last Spectator Mode row refreshed was in a story area with Interact everywhere on (for SPECLOCK)
+
 static int sites_of(const coop_site *t, size_t nt, const char *main_build, const coop_site **out) {
     int n = 0;
     *out = NULL;
@@ -50,6 +76,7 @@ static int sites_of(const coop_site *t, size_t nt, const char *main_build, const
 }
 int coop_interact_sites(const char *main_build, const coop_site **out) { return sites_of(g_sites, sizeof g_sites / sizeof g_sites[0], main_build, out); }
 int coop_story_sites(const char *main_build, const coop_site **out) { return sites_of(g_story, sizeof g_story / sizeof g_story[0], main_build, out); }
+int coop_text_sites(const char *main_build, const coop_site **out) { return sites_of(g_text, sizeof g_text / sizeof g_text[0], main_build, out); }
 
 int coop_story_on(void) {
     const char *e = getenv("DM_COOP_STORY");
@@ -70,6 +97,15 @@ void coop_interact_site(int id, uint64_t *x) {
     if (id == COOP_SITE_TALK && coop_story_on()) x[0] = 1;           // IsHost: yes
     if (id == COOP_SITE_ALONE && g_story_host) x[0] = 0;             // IsOnline's answer: no
     if (id == COOP_SITE_ALONE8 && g_story_host) x[8] = 0;            // GameMgr's online bit, read inside IsOnline: clear
+    if (id == COOP_SITE_STAGEONE && coop_interact_on()) x[0] = 0;    // the stage-type-1 check's answer: no
+    if (id == COOP_SITE_SPECROW) {
+        g_off_row = 0; g_spec_story = coop_interact_on() && x[8] >= 1 && x[8] <= 10;
+        if (g_spec_story && x[19]) {
+            *(volatile uint32_t *)(uintptr_t)(x[19] + 0x400) = 1; x[8] = 12; g_off_row = x[19];   // "Off", and Palette Town's path keeps it
+        }
+    }
+    if (id == COOP_SITE_SPECROW2 && g_off_row && g_off_row == x[19]) x[9] = 0;   // not a screen that forces "On"
+    if (id == COOP_SITE_SPECLOCK && g_spec_story) x[8] = 1;             // the hosting context: locked outside Palette Town
 }
 
 uint64_t coop_mods_add(uint64_t h, const char *name) {

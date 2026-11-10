@@ -15,6 +15,13 @@ changes.
 | Changed | `vk/vk_tex.c/.h` (which images are drawn larger, their size, readbacks at the game's size, taking one back to 1x), `vk/vk_replay.c/.h` (render areas, viewports, scissors, clears, copies and blits in each image's own pixels; the support buffer's render scales per draw), `vk/vk_shader.c/.h` (each texture's render-scale entry), `vk/vk_present.c/.h`, `vk/shaders/present.frag` (a picture larger than the window averaged down), `vk/vk_shot.c` (screenshots at the picture's own size), `scripts/play.ps1` (Resolution) |
 | Contract | unchanged (`gfx_backend.h`, `nvn_obj.h`, `dmsh_abi.h`); the shader cache is unchanged (no new reflection field) |
 
+## Below 1x
+
+Factors from 0.5 to just under 1 work the same way (`scale_clamp`), for a Steam Deck's 1280x720 (x0.667): the same images are made smaller, every
+coordinate maps into their own pixels as above, Ryujinx's hooks divide the fragment position by a scale under 1 as they multiply it by one over 1, and
+the present compares a picture drawn smaller with the window by its own pixels (on a larger window the sharp upscaler takes it). Images under 64 x 64
+at the game's size stay as they are, so the smallest scaled targets stay above about 43 x 43.
+
 ## 1. How the shaders take it
 
 Our SPIR-V comes from Ryujinx's shader translator (MIT), which already writes resolution-scale hooks into every shader that needs them, reading the

@@ -314,6 +314,154 @@ size_t vkspv_ballot_per_lane(uint32_t **pw, size_t n, int *rewritten) {
 }
 
 int vkspv_ballot_fix_wanted(uint32_t vendor, const char *env) { return env ? *env != '0' : vendor == 0x10de; }
+
+// 32-lane subgroups on a 64-lane GPU (#40: AMD's GCN, which cannot be asked for 32). NVN's shaders are written for 32-lane warps: the translated code reads a
+// ballot's .x, clamps shuffle lanes to 31 and votes over 32. Each 32-lane half of a 64-lane subgroup is made to act as one warp: the lane index (lane & 31),
+// the lane masks and a ballot as their half's word in .x, Any and All over the half (from ballots), a shuffle's source lane kept in the half, the size 32.
+// On 32-lane subgroups the half is always the first and the code computes what it did. The new word count (*pw replaced) and *rewritten instructions; n when
+// nothing changed, with *why set when the module has a subgroup operation or built-in this does not handle (then left as it is)
+size_t vkspv_sg32_emulate(uint32_t **pw, size_t n, int *rewritten, const char **why) {
+    enum { O_ENTRY_POINT = 15, O_CAPABILITY = 17, O_TYPE_BOOL = 20, O_TYPE_INT = 21, O_TYPE_VECTOR = 23, O_TYPE_POINTER = 32, O_CONSTANT_TRUE = 41,
+           O_CONSTANT = 43, O_FUNCTION = 54, O_VARIABLE = 59, O_LOAD = 61, O_DECORATE = 71, O_COMPOSITE_CONSTRUCT = 80, O_COMPOSITE_EXTRACT = 81,
+           O_ACCESS_CHAIN = 65, O_IN_BOUNDS_ACCESS_CHAIN = 66, O_COPY_OBJECT = 83, O_SELECT = 169, O_IEQUAL = 170, O_INOTEQUAL = 171, O_OR = 197, O_AND = 199,
+           O_ALL = 334, O_ANY = 335, O_BALLOT = 339,
+           O_SHUFFLE = 345, DEC_BUILTIN = 11, BI_SIZE = 36, BI_NUM_SUBGROUPS = 38, BI_SUBGROUP_ID = 40, BI_LANE = 41, BI_EQ = 4416, BI_LT = 4420,
+           CAP_BALLOT = 64, SC_INPUT = 1 };
+    uint32_t *w = *pw;
+    *rewritten = 0; *why = NULL;
+    if (!spv_ok(w, n)) return n;
+    uint32_t bound = w[3], tu = 0, tb = 0, tv4 = 0, pin = 0, c0 = 0, c31 = 0, c32 = 0, ct = 0, lane = 0, size_var = 0, masks[5] = {0};
+    int ops = 0, all = 0, cap_ballot = 0, loads = 0;
+    size_t first_fn = 0, first_global = 0;
+    uint32_t *def = calloc(bound, 4), *cval = calloc(bound, 4), *chain = calloc(bound, 4), *cbase = calloc(bound, 4);   // a 32-bit constant: its value + 1; a mask component's pointer: its index + 1, its mask
+    uint8_t *mvar = calloc(bound, 1);   // the lane masks' variables
+    for (size_t i = 5; i < n; ) {
+        uint32_t wc = w[i] >> 16, op = w[i] & 0xffff;
+        if (!wc || i + wc > n) { free(def); free(cval); free(chain); free(cbase); free(mvar); return n; }
+        if (op == O_CAPABILITY && wc == 2 && w[i + 1] == CAP_BALLOT) cap_ballot = 1;
+        if (op == O_CONSTANT && wc == 4 && w[i + 2] < bound && w[i + 1] < bound && def[w[i + 1]] && (w[def[w[i + 1]]] & 0xffff) == O_TYPE_INT && w[def[w[i + 1]] + 2] == 32)
+            cval[w[i + 2]] = w[i + 3] + 1;
+        if ((op == O_ACCESS_CHAIN || op == O_IN_BOUNDS_ACCESS_CHAIN) && wc >= 4 && w[i + 3] < bound && mvar[w[i + 3]]) {   // a mask's component (NVN's .x)
+            if (wc == 5 && w[i + 4] < bound && cval[w[i + 4]] && w[i + 2] < bound) { chain[w[i + 2]] = cval[w[i + 4]]; cbase[w[i + 2]] = w[i + 3]; }
+            else *why = "a lane mask is indexed by a variable";
+        }
+        if (!first_fn && !first_global && ((op >= 19 && op <= 39) || (op >= 41 && op <= 52) || op == O_VARIABLE)) first_global = i;   // types, constants, globals
+        if (op >= 19 && op <= 39 && wc >= 2 && w[i + 1] < bound) def[w[i + 1]] = (uint32_t)i;
+        if (op == O_VARIABLE && wc >= 4 && w[i + 2] < bound) def[w[i + 2]] = (uint32_t)i;
+        if (op == O_TYPE_INT && wc == 4 && w[i + 2] == 32 && !w[i + 3] && !tu) tu = w[i + 1];
+        if (op == O_TYPE_BOOL && wc == 2 && !tb) tb = w[i + 1];
+        if (op == O_TYPE_VECTOR && wc == 4 && tu && w[i + 2] == tu && w[i + 3] == 4 && !tv4) tv4 = w[i + 1];
+        if (op == O_TYPE_POINTER && wc == 4 && tu && w[i + 2] == SC_INPUT && w[i + 3] == tu && !pin) pin = w[i + 1];
+        if (op == O_CONSTANT_TRUE && wc == 3 && tb && w[i + 1] == tb && !ct) ct = w[i + 2];
+        if (op == O_CONSTANT && wc == 4 && tu && w[i + 1] == tu) {
+            if (w[i + 3] == 0 && !c0) c0 = w[i + 2]; else if (w[i + 3] == 31 && !c31) c31 = w[i + 2]; else if (w[i + 3] == 32 && !c32) c32 = w[i + 2];
+        }
+        if (op == O_DECORATE && wc == 4 && w[i + 2] == DEC_BUILTIN) {
+            uint32_t b = w[i + 3];
+            if (b == BI_LANE) lane = w[i + 1]; else if (b == BI_SIZE) size_var = w[i + 1];
+            else if (b >= BI_EQ && b <= BI_LT) { masks[b - BI_EQ] = w[i + 1]; if (w[i + 1] < bound) mvar[w[i + 1]] = 1; }
+            else if (b == BI_NUM_SUBGROUPS || b == BI_SUBGROUP_ID) *why = "it reads the subgroup count or id";
+        }
+        if (op == O_FUNCTION && !first_fn) first_fn = i;
+        if ((op >= 333 && op <= 366) || (op >= 4421 && op <= 4432)) {
+            if (op == O_ALL || op == O_ANY || op == O_BALLOT || op == O_SHUFFLE) { ops++; all |= op == O_ALL; }
+            else *why = "it has a subgroup operation other than ballot, any, all and shuffle";
+            if (op == O_BALLOT && wc == 5 && !(w[i + 1] < bound && def[w[i + 1]] && (w[def[w[i + 1]]] & 0xffff) == O_TYPE_VECTOR && w[def[w[i + 1]] + 2] == tu &&
+                                              w[def[w[i + 1]] + 3] == 4)) *why = "a ballot is not a vector of four uints";
+        }
+        if (op == O_LOAD && wc >= 4) loads |= w[i + 3] == lane || w[i + 3] == size_var || (w[i + 3] < bound && (mvar[w[i + 3]] || chain[w[i + 3]]));
+        if (op == O_LOAD && wc >= 4 && w[i + 3] < bound && chain[w[i + 3]] && w[i + 1] != tu) *why = "a lane mask's component is not read as a uint";
+        i += wc;
+    }
+    // the built-ins: the lane index an Input uint, the masks Input uvec4s
+    #define PTR_TO(var, t) ((var) < bound && def[var] && def[w[def[var] + 1]] && (w[def[w[def[var] + 1]]] & 0xffff) == O_TYPE_POINTER && \
+                            w[def[w[def[var] + 1]] + 2] == SC_INPUT && w[def[w[def[var] + 1]] + 3] == (t))
+    if (!*why && lane && !PTR_TO(lane, tu)) *why = "its lane index is not an Input uint";
+    for (int k = 0; k < 5 && !*why; k++) if (masks[k] && !(tv4 && PTR_TO(masks[k], tv4))) *why = "a lane mask is not an Input uvec4";
+    if (!*why && size_var && !PTR_TO(size_var, tu)) *why = "its subgroup size is not an Input uint";
+    #undef PTR_TO
+    if (!*why && (ops || loads) && (!tu || !first_fn || !first_global)) *why = "the module is not as expected";
+    if (*why || !(ops || loads)) { free(def); free(cval); free(chain); free(cbase); free(mvar); return n; }
+    free(def); free(cval);
+    int need_lane = ops || masks[0] || masks[1] || masks[2] || masks[3] || masks[4], new_lane = need_lane && !lane;
+    if (new_lane) lane = bound++;   // a lane index of its own, declared below (the entry points name it before its declaration)
+    wbuf o = {0};
+    wput(&o, w, 5);
+    #define EMIT(...) do { uint32_t x_[] = {__VA_ARGS__}; wput(&o, x_, sizeof x_ / 4); } while (0)
+    #define HALF_WORD(v, sel) do { uint32_t raw_ = bound++, h_ = bound++, hb_ = bound++, lo_ = bound++, hi_ = bound++; sel = bound++; \
+        EMIT(4u << 16 | O_LOAD, tu, raw_, lane); EMIT(5u << 16 | O_AND, tu, h_, raw_, c32); EMIT(5u << 16 | O_INOTEQUAL, tb, hb_, h_, c0); \
+        EMIT(5u << 16 | O_COMPOSITE_EXTRACT, tu, lo_, v, 0); EMIT(5u << 16 | O_COMPOSITE_EXTRACT, tu, hi_, v, 1); EMIT(6u << 16 | O_SELECT, tu, sel, hb_, hi_, lo_); } while (0)
+    for (size_t i = 5; i < n; ) {
+        uint32_t wc = w[i] >> 16, op = w[i] & 0xffff;
+        if (i == 5 && ops && !cap_ballot) EMIT(2u << 16 | O_CAPABILITY, CAP_BALLOT);   // Any and All are made from ballots
+        if (new_lane && i == first_global) EMIT(4u << 16 | O_DECORATE, lane, DEC_BUILTIN, BI_LANE);
+        if (i == first_fn) {
+            if (!tb) { tb = bound++; EMIT(2u << 16 | O_TYPE_BOOL, tb); }
+            if (!tv4) { tv4 = bound++; EMIT(4u << 16 | O_TYPE_VECTOR, tv4, tu, 4); }
+            if (new_lane) { if (!pin) { pin = bound++; EMIT(4u << 16 | O_TYPE_POINTER, pin, SC_INPUT, tu); } EMIT(4u << 16 | O_VARIABLE, pin, lane, SC_INPUT); }
+            if (!c0) { c0 = bound++; EMIT(4u << 16 | O_CONSTANT, tu, c0, 0); }
+            if (!c31) { c31 = bound++; EMIT(4u << 16 | O_CONSTANT, tu, c31, 31); }
+            if (!c32) { c32 = bound++; EMIT(4u << 16 | O_CONSTANT, tu, c32, 32); }
+            if (all && !ct) { ct = bound++; EMIT(3u << 16 | O_CONSTANT_TRUE, tb, ct); }
+        }
+        if (op == O_ENTRY_POINT && new_lane) {   // the new built-in in each entry point's interface
+            EMIT((wc + 1) << 16 | op); wput(&o, w + i + 1, wc - 1); EMIT(lane);
+        } else if (op == O_LOAD && wc >= 4 && w[i + 3] == lane && !new_lane) {   // the lane index within its half
+            uint32_t raw = bound++;
+            EMIT(wc << 16 | op, w[i + 1], raw); wput(&o, w + i + 3, wc - 3); EMIT(5u << 16 | O_AND, w[i + 1], w[i + 2], raw, c31);
+            (*rewritten)++;
+        } else if (op == O_LOAD && wc >= 4 && size_var && w[i + 3] == size_var) {
+            EMIT(4u << 16 | O_COPY_OBJECT, w[i + 1], w[i + 2], c32); (*rewritten)++;
+        } else if (op == O_LOAD && wc >= 4 && w[i + 3] < bound && chain[w[i + 3]]) {   // a mask's component: .x its half's word, the others 0
+            if (chain[w[i + 3]] == 1) {
+                uint32_t m = bound++, sel;
+                EMIT(4u << 16 | O_LOAD, tv4, m, cbase[w[i + 3]]); HALF_WORD(m, sel); EMIT(4u << 16 | O_COPY_OBJECT, w[i + 1], w[i + 2], sel);
+            } else EMIT(4u << 16 | O_COPY_OBJECT, w[i + 1], w[i + 2], c0);
+            (*rewritten)++;
+        } else if (op == O_LOAD && wc >= 4 && (w[i + 3] == masks[0] || w[i + 3] == masks[1] || w[i + 3] == masks[2] || w[i + 3] == masks[3] || w[i + 3] == masks[4]) &&
+                   w[i + 3]) {   // a lane mask: its half's word (the bits of the lanes in the lane's own half, as numbered there)
+            uint32_t m = bound++, sel;
+            EMIT(wc << 16 | op, w[i + 1], m); wput(&o, w + i + 3, wc - 3);
+            HALF_WORD(m, sel); EMIT(7u << 16 | O_COMPOSITE_CONSTRUCT, w[i + 1], w[i + 2], sel, c0, c0, c0);
+            (*rewritten)++;
+        } else if (op == O_BALLOT && wc == 5) {
+            uint32_t b = bound++, sel;
+            EMIT(5u << 16 | op, w[i + 1], b, w[i + 3], w[i + 4]);
+            HALF_WORD(b, sel); EMIT(7u << 16 | O_COMPOSITE_CONSTRUCT, w[i + 1], w[i + 2], sel, c0, c0, c0);
+            (*rewritten)++;
+        } else if (op == O_ANY && wc == 5) {   // some lane of the half: its ballot's word is not 0
+            uint32_t b = bound++, sel;
+            EMIT(5u << 16 | O_BALLOT, tv4, b, w[i + 3], w[i + 4]);
+            HALF_WORD(b, sel); EMIT(5u << 16 | O_INOTEQUAL, w[i + 1], w[i + 2], sel, c0);
+            (*rewritten)++;
+        } else if (op == O_ALL && wc == 5) {   // every active lane of the half: its ballot's word is the half's active lanes
+            uint32_t bp = bound++, ba = bound++, sp, sa;
+            EMIT(5u << 16 | O_BALLOT, tv4, bp, w[i + 3], w[i + 4]); EMIT(5u << 16 | O_BALLOT, tv4, ba, w[i + 3], ct);
+            HALF_WORD(bp, sp); HALF_WORD(ba, sa); EMIT(5u << 16 | O_IEQUAL, w[i + 1], w[i + 2], sp, sa);
+            (*rewritten)++;
+        } else if (op == O_SHUFFLE && wc == 6) {   // the source lane in the half: (id & 31) | (lane & 32)
+            uint32_t raw = bound++, hi = bound++, lo = bound++, id = bound++;
+            EMIT(4u << 16 | O_LOAD, tu, raw, lane); EMIT(5u << 16 | O_AND, tu, hi, raw, c32); EMIT(5u << 16 | O_AND, tu, lo, w[i + 5], c31);
+            EMIT(5u << 16 | O_OR, tu, id, lo, hi); EMIT(6u << 16 | op, w[i + 1], w[i + 2], w[i + 3], w[i + 4], id);
+            (*rewritten)++;
+        } else wput(&o, w + i, wc);
+        i += wc;
+    }
+    #undef HALF_WORD
+    #undef EMIT
+    o.w[3] = bound;
+    free(chain); free(cbase); free(mvar);
+    free(w);
+    *pw = o.w;
+    return o.n;
+}
+// The 32-lane rewrite applies where subgroups may have 64 lanes (AMD), unless NXRT_VK_SUBGROUP32=0; =emulate makes it on any GPU (a test: on 32-lane
+// subgroups the rewritten code computes the same)
+int vkspv_sg32_emulate_wanted(uint32_t size, uint32_t max_size, const char *env) {
+    if (env && *env == '0') return 0;
+    if (env && !strcmp(env, "emulate")) return 1;
+    return size == 64 || max_size == 64;
+}
 // The loop guards: 1 the table-size guards (NVIDIA, where D-1's and D-11's hangs were), 2 constant caps of 16384 (other GPUs: AMD's Windows driver crashed making
 // 634565ab's table-size guard, an edit that queries the table's size; a cap is a plain minimum), 0 none. NXRT_VK_LOOP_GUARD: 0 none, cap the caps, else the table guards
 int vkspv_loop_guard_wanted(uint32_t vendor, const char *env) { if (env) return *env == '0' ? 0 : !strcmp(env, "cap") ? 2 : 1; return vendor == 0x10de ? 1 : 2; }
@@ -915,6 +1063,11 @@ vks_shader *vksh_make(const char *key, const uint8_t *spv, size_t spv_size, cons
     if (ballot_fix) {
         int nb = 0; size_t bn = vkspv_ballot_per_lane(&w, nw, &nb);
         if (nb) { nw = bn; VKLOG("shader %s: %d subgroup ballot%s for a counter made per lane (NVIDIA hang after early returns: #12, D-1)", key, nb, nb > 1 ? "s" : ""); }
+    }
+    if (g_vk.has.sg32_emulate) {   // 64-lane subgroups acting as 32-lane ones (vk_dev.c decides)
+        int ne = 0; const char *ewhy = NULL; size_t en = vkspv_sg32_emulate(&w, nw, &ne, &ewhy);
+        if (ne) { nw = en; VKLOG("shader %s: %d subgroup operation%s made to act on 32-lane halves (#40)", key, ne, ne > 1 ? "s" : ""); }
+        else if (ewhy) VKRED("shader %s: its subgroup operations are left for %u lanes: %s", key, g_vk.has.subgroup_size, ewhy);
     }
     static int loop_guard = -1;   // decided at the first shader, as the ballot rewrite (vkspv_loop_guard_wanted: 1 table-size guards, 2 constant caps, 0 none)
     if (loop_guard < 0) {

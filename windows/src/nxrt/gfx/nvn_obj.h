@@ -217,7 +217,7 @@ uint64_t gfx_drawable_ns_take(void);   // Take and zero: cumulative ns spent wai
 void gfx_bw(uint64_t *load, uint64_t *store, uint64_t *full_rw_passes);   // Cumulative attachment load / store bytes, cumulative number of full load-store passes
 uint64_t gfx_udc_saved_bytes(void);                                      // Write-back bytes actually saved by DM_NVN_UNWRITTEN_DC
 int gfx_has_window(void);
-int gfx_fps_target(void);                                   // target frame rate 30 / 60 (power-saving mode, DM_FPS, the game itself asking for 30)
+int gfx_fps_target(void);                                   // target frame rate 30, 40, 45, 50 or 60 (DM_FPS, the in-game menu)
 int gfx_warm_wait(int timeout_ms);
 int gfx_link_active(void);
 int gfx_link_wait_tick(int vsyncs, uint64_t timeout_ns);   // vsyncs = the game's present interval
