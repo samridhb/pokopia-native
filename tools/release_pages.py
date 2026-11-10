@@ -15,6 +15,10 @@ ANDROID_GUIDE = REPO + '/blob/android-beta/docs/ANDROID.md'
 
 # tag: (title, one-line summary)
 PAGES = {
+    'v1.4.1': ('Pokopia Native 1.4.1: the Mac builds again, settings on the Mac and iPhone, a faster Steam Deck',
+               "The fix for 1.4.0's Mac build, settings with rebinding on the Mac and iPhone, an update notice, a new look and icon, frame-rate caps "
+               'of 50, 45 and 40, speech bubbles that stay over their Pokémon in Wide view, split-screen fixes, a faster Steam Deck, and fixes for '
+               'older AMD cards and Mac water.'),
     'v1.4.0': ('Pokopia Native 1.4.0: DLC support, and Linux and the Steam Deck out of beta',
                'DLC support at last: your own DLC on Windows and Linux. Also new: Linux and the Steam Deck as a full release, anti-aliasing, '
                'split-screen co-op on one PC (experimental), Play Pokopia as a program for the taskbar or Steam, the Story co-op fix for the '
@@ -82,13 +86,16 @@ FEATURES = [   # {W} reads "Windows" before 1.4.0 and "Windows and Linux" from 1
     ('Graphics', '1.2.3', 'sharp upscaling and display settings ({W})'),
     ('Graphics', '1.3.0', 'up to 4K, with settings in the game on F1 ({W})'), ('Graphics', '1.3.4', 'Wide view for 21:9 (experimental, Windows)'),
     ('Graphics', '1.4.0', 'anti-aliasing, SMAA or FXAA ({W})'), ('Graphics', '1.4.0', 'a graphics thread for a smoother frame rate ({W})'),
+    ('Graphics', '1.4.1', 'frame-rate caps of 50, 45 and 40 ({W})'),
     ('Controls', '1.0.0', 'drag to look (Mac and iPhone)'), ('Controls', '1.1.0', 'mouse look and controllers ({W})'),
     ('Controls', '1.2.0', 'keyboard rebinding ({W})'), ('Controls', '1.3.5', 'controller rebinding and player 1 choice ({W})'),
     ('Controls', '1.3.5', "many more controllers, through SDL's community list ({W})"),
+    ('Controls', '1.4.1', 'settings and rebinding on the Mac and iPhone'),
     ('Builder and saves', '1.0.0', 'built from your own dump'), ('Builder and saves', '1.0.0', 'the iPhone app from a Mac or a Windows PC'),
     ('Builder and saves', '1.1.0', 'bring your save over ({W})'), ('Builder and saves', '1.1.1', '.nup dumps'),
     ('Builder and saves', '1.3.0', 'a step-by-step builder'), ('Builder and saves', '1.4.0', 'your own DLC ({W})'),
     ('Builder and saves', '1.4.0', 'Play Pokopia as a program to pin or add to Steam (Windows)'),
+    ('Builder and saves', '1.4.1', 'an update notice, and Download and update in the builder'),
 ]
 LINUX_SKIP = ('Mac and iPhone', 'drag to look', 'the iPhone app', 'Link Play settings', 'automatic port forwarding', 'Wide view')
 
@@ -182,7 +189,22 @@ def footer(checksums):
     return out
 
 # A release's biggest changes, first on its page, and the order of its "New in" sections (the rest keep the notes' order)
-LEAD = {'v1.4.0': '''### Highlights
+LEAD = {'v1.4.1': '''### Highlights
+
+- **The Mac builds again.** 1.4.0's Mac download stopped every Mac build at the shader step; 1.4.1 builds through, the iPhone app made
+  on a Mac included.
+- **Settings on the Mac and iPhone.** Rebind keys and controller buttons, pick player 1, and change the graphics while you play: **F1** or
+  **⌘,** on the Mac; on the iPhone, **Home** on a controller, or hold the round layout button at the top of the screen.
+- **An update notice.** The builder and the game's launcher tell you when a new version is out, and **Download and update** gets it for
+  you.
+- **A faster Steam Deck.** It draws at its own 1280x720 with FXAA by default, and the graphics thread does about a quarter less work.
+- **Split screen, fixed and better:** it starts again, window 1 sits in its half, stacked or side by side, and F1 in window 2.
+- **Frame-rate caps of 50, 45 and 40,** and speech bubbles that stay over their Pokémon in Wide view (thanks **Pelikast**).
+- **No more "Spectator Mode" for the host** with Interact everywhere.
+- **Fixes for older AMD cards** (RX 400 and 500, [#40](https://github.com/xFractals/pokopia-native/issues/40)) and, we think, for flowing
+  water on the Mac ([#42](https://github.com/xFractals/pokopia-native/issues/42)).
+- **A new look and a new icon.**
+''', 'v1.4.0': '''### Highlights
 
 - **DLC support, at last.** If you bought the game's DLC, give the builder your own dump of it (**Add my DLC**) and the game on Windows
   and Linux uses it.
@@ -197,7 +219,8 @@ LEAD = {'v1.4.0': '''### Highlights
 - **A smoother frame rate when the processor is the limit.** The graphics work runs on a thread of its own: about 16 % more frames on
   our test PC, and the most help on smaller processors like the Steam Deck's.
 '''}
-ORDER = {'v1.4.0': ('Your own DLC', 'Windows and Linux', 'Windows', 'Linux and the Steam Deck', 'The builder and the guides', 'Getting it')}
+ORDER = {'v1.4.1': ('Mac and iPhone', 'Everywhere', 'Windows and Linux', 'Windows', 'Linux and the Steam Deck', 'Getting it'),
+         'v1.4.0': ('Your own DLC', 'Windows and Linux', 'Windows', 'Linux and the Steam Deck', 'The builder and the guides', 'Getting it')}
 
 def reorder(md, order):
     head, *parts = re.split(r'(?m)^(?=### )', md)
