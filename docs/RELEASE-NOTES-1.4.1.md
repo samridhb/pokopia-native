@@ -69,6 +69,9 @@ always will be: if anyone asks you to pay for it, it isn't us.
 
 ### Windows and Linux
 
+- **Fixed: no more "Spectator Mode" for the host with Interact everywhere** (thanks **Pelikast**). Hosting in a story area showed two notes
+  saying everyone would be restricted to Spectator Mode, and the settings showed Spectator Mode On, though nothing was restricted. Now the
+  notes are gone and the settings show **Spectator Mode: Off**. Visitors still see the game's own notice when they join; that's next.
 - **New: frame-rate caps of 50, 45 and 40 fps,** beside 60 and 30, for split screen or a slower processor (thanks **Pelikast**). **F1 →
   Graphics → Frame rate**, or the launcher. The game keeps its normal speed. 40 is even on a 120 Hz screen; 45 and 50 are smooth with
   FreeSync or G-Sync.
@@ -129,8 +132,8 @@ always will be: if anyone asks you to pay for it, it isn't us.
 - **Split screen is experimental** and Windows only. Two games at once with 1.4.1's fixes haven't been tried on our test PC (each game takes
   about 5 GB of memory; 32 GB is recommended). The second player's speech bubbles show only in window 1: the game itself hides them for a
   visitor.
-- **Interact everywhere and Story co-op are experimental.** The game's own messages still mention Spectator Mode, for the host and for
-  visitors; we're working on it for the next update. Story requests count only for the host.
+- **Interact everywhere and Story co-op are experimental.** Visitors still get the game's own Spectator Mode notice when they join, and its
+  "go home" message; we're working on those for the next update. Story requests count only for the host.
 - **Story co-op with a Mac or iPhone host:** a Pokémon with a "Time to get chatty!" request can still ask the host to "bring" themselves
   over while a session is open; end the session and talk to it again alone.
 - **Interact everywhere and Story co-op on 1.0.5** were checked in the game's code and started on Windows, but not yet played in a session
