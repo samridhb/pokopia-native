@@ -331,7 +331,7 @@ def launch(a, look=None):
     g.label(pic.body, 'The picture', 13, True, fg=C['title']).pack(fill='x')
     notes.append(g.label(pic.body, 'F1 in the game changes these and more while you play.', 10, fg=C['soft'])); notes[-1].pack(fill='x', pady=(2, 4))
     grid = tk.Frame(pic.body, bg=C['card']); grid.pack(fill='x'); grid.columnconfigure(1, weight=1)
-    defaults = {'console': a.console_default, 'fullscreen': False, 'antialiasing': 'smaa', 'fps': 60, 'fps_counter': 'off'}
+    defaults = {'console': a.console_default, 'fullscreen': False, 'antialiasing': 'fxaa' if a.deck else 'smaa', 'fps': 60, 'fps_counter': 'off'}   # play.sh's
     shown, pvars = {}, {}
     for key, title, choices in PICTURE:
         v = disp.get(key, defaults[key])
