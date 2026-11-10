@@ -50,7 +50,7 @@ When in doubt, update every device to the newest release.
 | **Windows** (1.3.5) | finds hosts by itself | host or visit; the game asks the router to open the port | the window before the game starts, and **F1 → Link Play** |
 | **Mac and iPhone** (1.3.5) | finds hosts by itself | host (with a port forwarded by hand, or a VPN) or visit | the app's launcher |
 | **Linux and Steam Deck** (beta) | hosts, or joins a host by its address; doesn't find hosts by itself yet | host (with a port forwarded by hand) or visit | the Link Play choice before the game starts |
-| **Android** (beta) | no Link Play yet | no Link Play yet | |
+| **Android** (beta 3, experimental) | hosts, or joins a host by its address; doesn't find hosts by itself yet | host or visit, with a room code | **Back → Link Play** in the game |
 
 ## On the same Wi-Fi
 
@@ -209,4 +209,4 @@ The switches for starting the game from a terminal (`-LinkPlay`, `-Join`, `-Inte
   with two players. Please report how they go.
 - **The in-game Link Play tab and automatic port forwarding are Windows only** for now. The Mac and iPhone get their own settings window in
   a later update; until then, hosting over the internet from them needs a port forwarded by hand, or a VPN.
-- **The Android beta has no Link Play yet.**
+- **Link Play on Android is experimental** (beta 3): the phone joins a host by its address, and has no automatic port forwarding.

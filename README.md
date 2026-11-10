@@ -16,14 +16,14 @@ with you from device to device, and you can play together across them.
   <a href="https://github.com/xFractals/pokopia-native/releases/latest/download/Pokopia-Native-for-Mac.zip"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/get-mac-dark.svg"><img src="docs/assets/get-mac-light.svg" width="404" alt="Download for Mac and iPhone"></picture></a>
   <br>
   <a href="https://github.com/xFractals/pokopia-native/releases/latest"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/get-linux-dark.svg"><img src="docs/assets/get-linux-light.svg" width="404" alt="Download for Linux and Steam Deck"></picture></a>
-  <a href="https://github.com/xFractals/pokopia-native/releases/tag/v1.3.3-android-beta.2"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/get-android-dark.svg"><img src="docs/assets/get-android-light.svg" width="404" alt="Get the Android beta"></picture></a>
+  <a href="https://github.com/xFractals/pokopia-native/releases/tag/v1.4.1-android-beta.3"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/get-android-dark.svg"><img src="docs/assets/get-android-light.svg" width="404" alt="Get the Android beta"></picture></a>
 </p>
 
 **New here?** Every download has a step-by-step guide: **[Windows](docs/WINDOWS.md)** · **[Mac](docs/MAC.md)** ·
 **[iPhone](docs/IPHONE.md)** · **[Android](https://github.com/xFractals/pokopia-native/blob/android-beta/docs/ANDROID.md)** ·
 **[Linux & Steam Deck](docs/LINUX.md)**. Either the Windows or the Mac download also
 builds the iPhone app. On Android, check your phone first with the device test on the
-[Android beta's page](https://github.com/xFractals/pokopia-native/releases/tag/v1.3.3-android-beta.2). What's new is in the
+[Android beta's page](https://github.com/xFractals/pokopia-native/releases/tag/v1.4.1-android-beta.3). What's new is in the
 [release notes](https://github.com/xFractals/pokopia-native/releases).
 
 <p>
@@ -101,22 +101,22 @@ The builder checks all of this for you and tells you what to install.
 | **Rebind controller** | ✓ | ✓ | ✓ | Next beta | ✓ |
 | **Controllers** | ✓ | ✓ | ✓ | ✓ | ✓ |
 | **Touch controls** | — | — | ✓ | ✓ | — |
-| **Link Play** | ✓ | ✓ | ✓ | Not yet | ✓ |
-| **Story co-op** | ✓ | ✓ | ✓ | Not yet | ✓ |
+| **Link Play** | ✓ | ✓ | ✓ | ✓ (by address) | ✓ |
+| **Story co-op** | ✓ | ✓ | ✓ | ✓ | ✓ |
 | **Auto port forwarding** | ✓ | By hand | By hand | — | ✓ |
-| **Import a save** | ✓ | By hand | By hand | Not yet | ✓ |
-| **Your own DLC** | ✓ | Soon | Soon | — | ✓ |
+| **Import a save** | ✓ | By hand | By hand | ✓ | ✓ |
+| **Your own DLC** | ✓ | Soon | Soon | ✓ | ✓ |
 
 On the Mac the settings open with F1 (fn-F1 on most Mac keyboards) or Settings… (⌘,). On the iPhone, press Home on a controller, or
 without one hold the round layout button at the top centre of the screen (2D, 3D or Tap) for about a second. Link Play is for up to four
-players; Story co-op is experimental. Saves move between a PC, a Mac and an iPhone ([how](docs/SAVES.md)).
+players; Story co-op is experimental. Saves move between a PC, a Mac, an iPhone and an Android phone ([how](docs/SAVES.md)).
 
 **On the way:** your own DLC on the Mac and iPhone.
 
 ## Play together
 
-Link Play connects Pokopia Native on Windows, Mac, iPhone and Linux in any mix, up to four players, without Nintendo's servers. (The
-Android beta doesn't have it yet.)
+Link Play connects Pokopia Native on Windows, Mac, iPhone, Linux and Android in any mix, up to four players, without Nintendo's servers.
+(On Android it's experimental, and joins a host by its address.)
 
 - **On the same Wi-Fi,** hosts find each other (Linux joins by address for now).
 - **Over the internet or a VPN,** the host shares an address and a room code. On Windows, **F1 → Link Play → Copy invite** puts both in

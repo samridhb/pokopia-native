@@ -73,8 +73,10 @@ Fully close the app on the phone first (swipe it away in the app switcher), and 
 
 ## The Android beta
 
-The Android app keeps its save inside its own folder on the phone. **Bringing a save over to it isn't in this beta yet.** Uninstalling the
-app deletes its save, so never uninstall it to update: build again with the same build folder and install over it. The
+The Android app keeps its save inside its own folder on the phone. From beta 3, the builder's **Your save** step moves it, with the phone
+connected: **Bring my save** puts a save from a PC, a Mac or an iPhone on the phone (the app keeps the save it had beside it), and **Copy
+the phone's save here** copies the phone's save into your build folder. Uninstalling the app deletes its save, so never uninstall it to
+update: build again with the same build folder and install over it. The
 [Android guide](https://github.com/xFractals/pokopia-native/blob/android-beta/docs/ANDROID.md) has the steps.
 
 ## Updating without losing your save
