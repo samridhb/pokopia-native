@@ -1,10 +1,19 @@
 [
  {
+  "tag": "v1.4.1",
+  "title": "Pokopia Native 1.4.1: the Mac builds again, settings on the Mac and iPhone, a faster Steam Deck",
+  "date": "",
+  "prerelease": false,
+  "latest": true,
+  "chars": 18315,
+  "published": false
+ },
+ {
   "tag": "v1.4.0",
   "title": "Pokopia Native 1.4.0: DLC support, and Linux and the Steam Deck out of beta",
   "date": "",
   "prerelease": false,
-  "latest": true,
+  "latest": false,
   "chars": 22095,
   "published": false
  },
