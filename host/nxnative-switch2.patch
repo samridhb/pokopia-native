@@ -442,7 +442,7 @@ index 9e28924..2a31677 100644
 -#define NVN_NFUNC 537
 +#define NVN_NFUNC 734
 diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
-index ac449a5..717095f 100644
+index ac449a5..3e44301 100644
 --- a/dm/gfx/nvn/nvn_mtl.m
 +++ b/dm/gfx/nvn/nvn_mtl.m
 @@ -471,6 +471,7 @@ void mtl_init(void) {
@@ -474,7 +474,61 @@ index ac449a5..717095f 100644
                  snprintf(path, sizeof path, "%s/%s.ctl", shd, k.UTF8String); if ((f = fopen(path, "wb"))) { fwrite(p->sd[i].control, 1, 0x880, f); fclose(f); }
                  snprintf(path, sizeof path, "%s/%s.code", shd, k.UTF8String);
                  if (p->sd[i].data && ncode && ncode < (1u << 24) && (f = fopen(path, "wb"))) { fwrite((const void *)(uintptr_t)p->sd[i].data, 1, ncode, f); fclose(f); } }
-@@ -9893,6 +9897,15 @@ static void dispatch(const p_dispatch *dp) {
+@@ -8925,6 +8929,7 @@ void ms_after(void) {
+ static int g_fb_mode = -1;   // 0 none, 1 writers with reuse until a barrier, 2 every sampling draw, fresh
+ static uint64_t g_fb_bar, g_fb_reuse, g_fb_split;   // game barriers so far (OP_BARRIER with bits); draws that reused a snapshot; passes ended before a write to an attachment an earlier draw read
+ static uint64_t g_fb_pass = UINT64_MAX; static uint32_t g_fb_wmask, g_fb_rmask;   // the current Metal render pass: color attachments written so far, sampled directly
++static int g_fb_dwrite; static uint64_t g_fb_dsplit;   // the current Metal render pass has written its depth attachment; passes ended before a draw read the depth (fb_depth)
+ typedef struct { uint64_t ser, bar, sub; int lv, sl; __strong id<MTLTexture> snap; } fb_cache_t;
+ static fb_cache_t g_fbc[8]; static int g_fbc_next;
+ static int fb_mode(void) {
+@@ -8932,7 +8937,7 @@ static int fb_mode(void) {
+         if (g_fb_mode != 1) MLOG("same-pass feedback sampling snapshot: %s (DM_NVN_FB_SNAP)", g_fb_mode ? "a fresh one for every draw sampling an attachment of its pass" : "off"); }
+     return g_fb_mode;
+ }
+-static inline void fb_pass_sync(void) { uint64_t p = g_stat_pass + !g_enc; if (p != g_fb_pass) { g_fb_pass = p; g_fb_wmask = g_fb_rmask = 0; } }
++static inline void fb_pass_sync(void) { uint64_t p = g_stat_pass + !g_enc; if (p != g_fb_pass) { g_fb_pass = p; g_fb_wmask = g_fb_rmask = 0; g_fb_dwrite = 0; } }
+ // The snapshot of an attachment's level and layer: the cached one (valid: *fresh = 0) or a texture to copy into (*fresh = 1; the entry is then valid from this barrier and submission on)
+ static fb_cache_t *fb_snap(uint64_t ser, int lv, int sl, MTLPixelFormat pf, NSUInteger w, NSUInteger h, int force, int *fresh) {
+     fb_cache_t *e = NULL;
+@@ -8946,10 +8951,36 @@ static fb_cache_t *fb_snap(uint64_t ser, int lv, int sl, MTLPixelFormat pf, NSUI
+         e->snap = [g_dev newTextureWithDescriptor:d]; if (!e->snap) { e->ser = 0; return NULL; } res_add(e->snap); }   // full queue barriers separate a copy from the draws that read the earlier content
+     e->ser = ser; e->lv = lv; e->sl = sl; e->bar = g_fb_bar; e->sub = g_sub_serial; *fresh = 1; return e;
+ }
++// Same-pass depth reads (#42): a draw whose fragment stage samples the depth attachment of the open render pass after a draw of that pass wrote depth. On a tiled GPU
++// those writes are still in tile memory, so the read returns the depth stored before the pass, the frame before's (Pokopia's flowing water faded to faint panels and the
++// ground behind it smeared as the camera moved). The pass ends first, so the depth lands in memory, and the draw reopens it loading the depth; later reads reuse that until a
++// draw of the new pass writes depth again. A draw that samples the depth it writes is left as it is (logged once). DM_NVN_FB_SNAP=0 turns this off with the color snapshots
++static void fb_depth(NvProg *pr) {
++    if (!R.rt.depth || g_fz.active || g_defer_replaying || !fb_mode()) return;
++    fb_pass_sync();
++    int dw = S.ds.dt && S.ds.dw;   // this draw writes depth
++    NvShader *fs = pr ? pr->sh[1] : nil; int reads = 0;
++    if (fs && g_fb_dwrite) for (int i = 0; i < fs->rf.nb && !reads; i++) { const nvn_rbind *b = &fs->rf.b[i]; if (b->kind != NVN_RB_TEX || b->reg >= NTEX) continue;
++        int tid = (int)(tex_slot_h(S.tex[1], S.img[1], b->reg) & 0xfffff); if (!tid) continue;
++        os_unfair_lock_lock(&g_rmu); uint64_t ser = tid < g_ntreg && g_treg[tid].ok ? g_treg[tid].t.serial : 0; os_unfair_lock_unlock(&g_rmu);
++        reads = ser && ser == R.rt.depth->serial; }
++    if (reads && g_enc) {
++        if (dw) { static int once; if (!once++) MLOG("same-pass depth read: shader %s samples the depth attachment it writes; left as is", fs->key); }
++        else {
++            rp_end(); fb_pass_sync(); g_fb_dsplit++;
++            if (g_fb_dsplit == 1 || g_fb_dsplit == 10 || g_fb_dsplit == 1000 || g_fb_dsplit % 100000 == 0)
++                MLOG("same-pass depth read: pass ended before the read #%llu (frame %llu pass %llu, shader %s samples the depth attachment ser=%llu after its pass wrote it)",
++                     (unsigned long long)g_fb_dsplit, (unsigned long long)atomic_load(&g_cur_frame), g_stat_pass, fs->key, (unsigned long long)R.rt.depth->serial);
++            PD("N %llu same-pass depth read: the pass ends so the depth this draw samples is stored", g_stat_pass + 1);
++        }
++    }
++    if (dw) g_fb_dwrite = 1;
++}
+ // Called before the draw opens its render pass: if a snapshot is needed, end the current render pass, copy the snapshot (or reuse a valid one) and register the substitution (used by this draw's argument encoding)
+ static void fb_prepare(NvProg *pr) {
+     g_draw_seq++; g_fb_n = 0;
+     if (g_fb_rebind) { args_dirty_all(); g_fb_rebind = 0; }   // the previous draw had a substituted binding: re-encode with the original bindings this time
++    fb_depth(pr);   // same-pass depth reads first: every draw counts its depth writes, with or without a fragment shader
+     if (!pr || !pr->sh[1] || !R.rt.n || g_fz.active || g_defer_replaying || !fb_mode()) return;
+     NvShader *fs = pr->sh[1];
+     fb_pass_sync();
+@@ -9893,6 +9924,15 @@ static void dispatch(const p_dispatch *dp) {
      if (dp->ind) { static int once; if (!once++) MLOG("indirect dispatch: first time (the GPU reads the threadgroup counts from %#llx)", (unsigned long long)dp->ind); }
      NvShader *cs = prog_get(S.cprog)->sh[5];
      if (!cs) { RED_ONCE(28, "the dispatched program has no compute shader (or it is not mapped)"); return; }
@@ -490,7 +544,7 @@ index ac449a5..717095f 100644
      const void *k = (__bridge const void *)cs;
      id<MTLComputePipelineState> ps = hm_get_id(&g_cps, &k);
      if (!ps) {
-@@ -10512,12 +10525,13 @@ static void sub_cut(void) {
+@@ -10512,12 +10552,13 @@ static void sub_cut(void) {
      up_flush();
      uint64_t f = atomic_load(&g_cur_frame); gpu_tag_begin(f);
      uint32_t k = g_seg++; seg_clk *sc = NULL;   // reports encoded so far keep this segment's GPU times (seg_ts)
@@ -505,7 +559,7 @@ index ac449a5..717095f 100644
      }];
      res_commit();
      [g_cb endCommandBuffer];
-@@ -11012,11 +11026,14 @@ void dm_gfx_texraw(uint64_t serial, const char *path) {
+@@ -11012,11 +11053,14 @@ void dm_gfx_texraw(uint64_t serial, const char *path) {
      if (t.storageMode == MTLStorageModeMemoryless || t.pixelFormat == MTLPixelFormatInvalid) return;
      NSUInteger w = t.width, h = t.height, row = w * 16, sz = row * h;   // 16 bytes a texel: a multiple of every uncompressed texel size
      NSUInteger ns = (t.textureType == MTLTextureTypeCube || t.textureType == MTLTextureTypeCubeArray ? 6 : 1) * MAX(t.arrayLength, 1u);   // every slice (a cube's six faces), one after another
@@ -522,7 +576,7 @@ index ac449a5..717095f 100644
      [b endEncoding]; [cb commit]; [cb waitUntilCompleted];
      FILE *f = fopen(path, "wb"); if (f) { fprintf(f, "%lu %lu %lu %lu", (unsigned long)w, (unsigned long)h, (unsigned long)t.pixelFormat, (unsigned long)row); if (ns > 1) fprintf(f, " %lu", (unsigned long)ns); fputc('\n', f); fwrite(buf.contents, 1, sz * ns, f); fclose(f); }
      const uint8_t *p = buf.contents;
-@@ -11258,17 +11275,27 @@ static int present_encode(id<MTLCommandBuffer> cb, id<MTLTexture> src, id<MTLTex
+@@ -11258,17 +11302,27 @@ static int present_encode(id<MTLCommandBuffer> cb, id<MTLTexture> src, id<MTLTex
  typedef struct { id<MTL4FXSpatialScaler> sc; id<MTLTexture> in, out; uint64_t made_at; int made; NSUInteger refused[6]; } fx_state;
  static fx_state g_fx_present;   // only the present thread encodes or replaces the scaler
  static id<MTL4Compiler> g_fx_comp;
