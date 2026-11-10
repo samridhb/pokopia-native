@@ -209,7 +209,14 @@ If the build finds run-time shaders beyond the known ones, tell us in the
   game turns the camera itself while you walk sideways, and the app has to steer it the way a stick would, in small steps. With it off, the
   mouse and the trackpad turn the camera directly.
 
-The keys can't be changed on the Mac yet; the Mac's own settings window is coming in a later update.
+**Settings during the game:** press **F1** (fn-F1 on most Mac keyboards) or choose **Settings… (⌘,)** in the app menu. A window opens over
+the game:
+- **Keyboard keys:** click an action, then press the key you want for it.
+- **Controller buttons:** one map for every controller.
+- **Player 1:** pick which controller it is; it's remembered.
+- **Graphics:** console mode, upscaling, and the window or fullscreen.
+
+The keys and buttons are kept in the same `controls.json` file as on Windows.
 
 ## The launcher's settings
 

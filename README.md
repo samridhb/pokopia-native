@@ -96,9 +96,9 @@ The builder checks all of this for you and tells you what to install.
 |:--|:--:|:--:|:--:|:--:|:--:|
 | **Release** | Stable | Stable | Stable | Beta | Stable |
 | **Graphics** | Vulkan, 4K | Metal, MetalFX | Metal | Vulkan | Vulkan, 4K |
-| **In-game settings** | F1 | Soon | Soon | Back | F1 |
-| **Rebind keys** | ✓ | Soon | — | — | ✓ |
-| **Rebind controller** | ✓ | Soon | Soon | Next beta | ✓ |
+| **In-game settings** | F1 | F1, ⌘, | ✓ | Back | F1 |
+| **Rebind keys** | ✓ | ✓ | — | — | ✓ |
+| **Rebind controller** | ✓ | ✓ | ✓ | Next beta | ✓ |
 | **Controllers** | ✓ | ✓ | ✓ | ✓ | ✓ |
 | **Touch controls** | — | — | ✓ | ✓ | — |
 | **Link Play** | ✓ | ✓ | ✓ | Not yet | ✓ |
@@ -107,9 +107,10 @@ The builder checks all of this for you and tells you what to install.
 | **Import a save** | ✓ | By hand | By hand | Not yet | ✓ |
 | **Your own DLC** | ✓ | Soon | Soon | — | ✓ |
 
-Link Play is for up to four players; Story co-op is experimental. Saves move between a PC, a Mac and an iPhone ([how](docs/SAVES.md)).
+On the Mac the settings open with F1 (fn-F1 on most Mac keyboards) or Settings… (⌘,); on the iPhone, press Home on a controller or hold the
+2D / 3D button. Link Play is for up to four players; Story co-op is experimental. Saves move between a PC, a Mac and an iPhone ([how](docs/SAVES.md)).
 
-**On the way:** smoother edges (anti-aliasing), and settings on the Mac and iPhone.
+**On the way:** smoother edges (anti-aliasing).
 
 ## Play together
 
