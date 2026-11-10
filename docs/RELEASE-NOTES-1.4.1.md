@@ -1,0 +1,550 @@
+# pokopia-native 1.4.1
+
+---
+
+**Join the community on [Discord](https://discord.gg/Aj9GqxZj8V)** for install help, bug reports, co-op partners and release news.
+
+**1.4.1 fixes the Mac build and brings settings to the Mac and iPhone.** 1.4.0's Mac download stopped at the shader step for every Mac
+player; 1.4.1 builds again. The Mac and iPhone now have their own settings, with key and controller rebinding. Also new: an update notice
+in the builder and the launchers, a new look and a new icon, a Linux launcher window, frame-rate caps of 50, 45 and 40 fps, speech
+bubbles that stay over their Pokémon in Wide view, split-screen fixes, a faster Steam Deck, and a fix for older AMD cards.
+
+## Which download do I need?
+
+| I have… | and want to… | Download |
+|---|---|---|
+| a Windows PC | play on Windows, or build the iPhone app | [Pokopia-Native-for-Windows.zip](https://github.com/xFractals/pokopia-native/releases/latest/download/Pokopia-Native-for-Windows.zip) |
+| a Mac | play on the Mac, or build the iPhone app | [Pokopia-Native-for-Mac.zip](https://github.com/xFractals/pokopia-native/releases/latest/download/Pokopia-Native-for-Mac.zip) |
+| a Steam Deck, or a Linux PC, and want the easy way | play there | [Pokopia-Native-Builder-1.4.1-x86_64.AppImage](https://github.com/xFractals/pokopia-native/releases/download/v1.4.1/Pokopia-Native-Builder-1.4.1-x86_64.AppImage) |
+| a Linux PC, and prefer a terminal | play there | [Pokopia-Native-for-Linux.zip](https://github.com/xFractals/pokopia-native/releases/latest/download/Pokopia-Native-for-Linux.zip) |
+
+- **Co-op needs a matching pokopia-native version on every device.** 1.4.1 plays with 1.4.0, and on game version 2.0.1 with 1.3.5 back to
+  1.3.0: the way games talk to each other didn't change. Interact everywhere and Story co-op keep their rules from 1.4.0 (below). Every
+  device needs the same game version: 1.0.5 and 2.0.1 can't play together.
+- **Each player needs their own save.** The game refuses a second copy of the same save.
+
+As always: **your own copy, your own dump.** No download contains anything of the game or its DLC; everything is made on your computer from
+your own dumps. Please do not share build folders, apps, IPAs, `game.dll`, shader files, saves or DLC folders. Pokopia Native is free, and
+always will be: if anyone asks you to pay for it, it isn't us.
+
+## New in 1.4.1
+
+### Mac and iPhone
+
+- **Fixed: the Mac build stops at the shader step** ("translation chain tools do not match the lock file: dmsh_xlate.dll"). 1.4.0's Mac
+  download carried a shader translator whose fingerprint didn't match the builder's list, so every Mac build, the iPhone app built on a Mac
+  included, stopped there. 1.4.1 builds through again; thanks to the player who reported it. If you're on 1.4.0, just use 1.4.1: open its
+  builder and choose **Update my game**.
+- **New: settings on the Mac.** Press **F1** (fn-F1 on most Mac keyboards) or choose **Settings… (⌘,)** in the app menu, and a window opens
+  over the game:
+  - **Keyboard:** click a button, then press the key you want; if that key was already used, the two swap. Esc cancels, and **Reset to
+    defaults** puts everything back.
+  - **Controller:** click a button, then press the controller's button. **Player 1:** pick the controller from the list, or choose it by
+    pressing one of its buttons; it's remembered.
+  - **Graphics:** console mode (Docked or Handheld), MetalFX upscaling, window or full screen.
+- **New: settings on the iPhone.**
+  - **With a controller:** press its **Home** button.
+  - **Without one:** hold the round **layout button** at the top centre of the screen (it reads **2D**, **3D** or **Tap**) for about a
+    second. A quick tap still just switches the touch layout, as before. The on-screen controls, that button included, hide while a
+    controller is connected.
+  - A sheet opens over the game: the controller's buttons (one map for every controller), Player 1, and graphics (console mode, MetalFX,
+    the frame-rate counter). Tap **Done** to go back to the game.
+- The keys and buttons are kept in the same `controls.json` as on Windows and Linux.
+
+### Everywhere
+
+- **New: the update notice.** Once a day the builder, and the game's launcher on Windows and Linux, ask GitHub for the latest release's
+  version: one request, with nothing about you, your game or your computer. When a newer one is out, they say so. **Check for updates**
+  turns it off: in the builder's **Advanced**, or in Pokopia Settings; one switch covers both.
+- **New: Download and update.** On the builder's first page, it downloads the new release for your computer from GitHub, checks it against
+  the release's checksum, unpacks it beside the old one and opens the new builder, which runs **Update my game**. Nothing is downloaded or
+  installed until you press it.
+- **New: a new look and a new icon.** The builder, the Windows launcher and the in-game F1 menu now share the GitHub page's colours, and
+  Pokopia Native has a new icon: the Windows **Play Pokopia** program, the Mac builder, the builder's window and the Linux AppImage use it.
+  The Mac, iPhone and Linux game apps use it too when you haven't made an icon from your game's title screen (`nxs2.py icon`).
+
+### Windows and Linux
+
+- **New: frame-rate caps of 50, 45 and 40 fps,** beside 60 and 30, for split screen or a slower processor (thanks **Pelikast**). **F1 →
+  Graphics → Frame rate**, or the launcher. The game keeps its normal speed. 40 is even on a 120 Hz screen; 45 and 50 are smooth with
+  FreeSync or G-Sync.
+- **Fixed: speech bubbles and markers in Wide view.** Bubbles, "i" signs and "This way!" stayed toward the middle of a wide screen instead
+  of over their Pokémon or object (thanks **Pelikast**). They now sit where they belong. Markers for objects out in the extra side areas
+  still don't show, as before.
+- **New: smaller picture sizes.** F1's Resolution (and the launcher's Display tab on Windows) now also offers 1280x720 and 1600x900, below
+  the game's own 1920x1080, for slower graphics.
+- **Fixed: older AMD cards (Radeon RX 400 and 500).** Some of the game's effects were drawn wrong on cards that run their shader groups 64
+  wide, the dark patches on the ground included ([#40](https://github.com/xFractals/pokopia-native/issues/40), thanks
+  **eduardosmulero-tech** for the careful measurements). The game's shaders now act as the game expects there. Tested on an NVIDIA card,
+  where nothing changes; please tell us how it looks on yours.
+- **Better: four more of the game's shader forms are translated,** so 106 more of its shaders work
+  ([#41](https://github.com/xFractals/pokopia-native/pull/41), thanks **SaranSundar**).
+
+### Windows
+
+- **Fixed: split screen starts again.** In 1.4.0 two of its files weren't copied next to the game ("split.ps1 is not recognized"); thanks
+  to **Pelikast** for finding it.
+- **Better: split screen.**
+  - Window 1 sits in its half again (in 1.4.0 it could come back small in the middle of the screen).
+  - **Layout:** stacked (top and bottom, the default) or side by side, in the launcher's Link Play tab. Each window fills its half, with
+    Wide view on its own for halves wider than 16:9.
+  - **F1 in window 2:** click window 2 to give it the keyboard, then press F1. A controller's Minus + Plus now opens only its own window's
+    menu, not both.
+- **New: the launcher's new window.** The same settings and choices as before, in the new look, with the update notice and a **Check for
+  updates** box.
+
+### Linux and the Steam Deck
+
+- **New: a launcher window.** Before the game starts, a window asks how you want to play (alone, Link Play on this network, hosting or
+  visiting over the internet) and shows the picture settings (console mode, display, anti-aliasing, frame rate, FPS counter), with the
+  update notice. It fits the Steam Deck's screen. Game Mode starts the game directly, as before.
+- **Better: the Steam Deck.** The game now draws at the Deck's own 1280x720 with FXAA by default (you can still pick more in F1), the
+  graphics work does less per draw, and waiting between frames sleeps instead of spinning. On our test PC that's 18 % less graphics time at
+  1280x720 and 8 % less work on the graphics thread; no Deck has measured it yet, so please tell us your frame rate.
+- **Fixed: anti-aliasing and Wide view are kept.** On Linux, a choice made in F1 was lost at the next start.
+
+### Getting it
+
+- **Windows and Linux:** unzip 1.4.1 into a new folder (or download the new AppImage) and open **Pokopia Native Builder**: it offers
+  **Update my game** and builds again into your build folder. Only what changed is redone. Your settings, save and recorded shaders carry
+  over. From now on, **Download and update** on the builder's first page does this for you.
+- **Mac:** unzip 1.4.1 into a new folder, open the builder and choose **Update my game**: it rebuilds the Mac app with the new settings.
+- **iPhone:** rebuild the app (Mac or Windows), sign it, and install it **over** the old one (never delete the app first: that deletes its
+  save).
+
+## Known issues
+
+- **Graphics on one PC:** the graphics changes were tested on one PC (Windows 11, an NVIDIA RTX 4070 Ti with 12 GB, a 4K monitor). AMD and
+  Intel graphics, RTX 50 cards and 4 GB cards are untested with them; please report how it runs.
+- **Windows: if the game still freezes for you**, please open an issue with the newest log from `%LOCALAPPDATA%\Pokopia Native\<game
+  version>\logs\`: it names the graphics program the card was running when it stopped.
+- **Windows: a dotted line of purple squares** in the sky, so far only on AMD cards. It's drawn in the 3D world, and we're testing with AMD
+  players to find the effect that's drawn wrong. It doesn't affect the game otherwise.
+- **At 30 fps** the picture reaches the screen about a frame later than at 60.
+- **DLC** is Windows and Linux only for now; the Mac and iPhone come next.
+- **Split screen is experimental** and Windows only. Two games at once with 1.4.1's fixes haven't been tried on our test PC (each game takes
+  about 5 GB of memory; 32 GB is recommended). The second player's speech bubbles show only in window 1: the game itself hides them for a
+  visitor.
+- **Interact everywhere and Story co-op are experimental.** The game's own messages still mention Spectator Mode, for the host and for
+  visitors; we're working on it for the next update. Story requests count only for the host.
+- **Story co-op with a Mac or iPhone host:** a Pokémon with a "Time to get chatty!" request can still ask the host to "bring" themselves
+  over while a session is open; end the session and talk to it again alone.
+- **Interact everywhere and Story co-op on 1.0.5** were checked in the game's code and started on Windows, but not yet played in a session
+  with two players. Please report how they go.
+- **The Mac and iPhone settings** were tested on one Mac and one iPhone; controller rebinding there with few real controllers so far.
+- **Two controllers of the same model** look identical to the game, so the remembered player 1 is whichever of them connects first.
+- **AMD:** when the game catches a driver crash, that one effect is left out of the picture instead of the game closing. Tell us if you see
+  something missing.
+- **The Mac and iPhone** have no in-game Link Play tab or automatic port forwarding yet: hosting over the internet from them still needs a
+  port forwarded by hand, or a VPN.
+- **Automatic port forwarding:** your router needs UPnP (or NAT-PMP / PCP) turned on, and Windows Firewall still asks the first time you
+  host. When your internet provider shares one address among many homes, no router setting helps: F1 → Link Play says so and suggests a VPN.
+- **F1 → Link Play lists every network adapter's address**, including virtual ones. The first one is the one your PC uses for the internet.
+- The first start draws some effects late while the run-time shaders are translated (about 150, once). On a fresh Mac or iPhone build,
+  the first screens can miss a few things (the language choice, for one) until those shaders are recorded; **Refresh the graphics** in the
+  builder adds them.
+- **The Mac and iPhone apps run on their own Metal engine:** anti-aliasing, the graphics thread, the frame-rate caps, split screen and DLC
+  are Windows and Linux only for now.
+- **Linux:**
+  - **No Steam Deck has run 1.4.1 yet,** so its frame rate is our estimate; please report how it runs.
+  - **Built from the Windows code, not tried on Linux yet:** controller rebinding, F1's Link Play tab, automatic port forwarding and Wide view.
+  - **On the same Wi-Fi,** a Linux game joins a host by its address; hosts are not found automatically there.
+  - **Some PipeWire setups have a trembling sound.** `SDL_AUDIO_DRIVER=pulseaudio` in front of the launcher is worth one try.
+- The iPhone app reads its Link Play settings when it starts: after changing them, close it fully and open it again.
+- **Internet play must match on every device**: a device with Internet play on does not see a host on the same Wi-Fi that has it off.
+
+## Upgrading
+
+- **From 1.4.0:** see "Getting it" above. Windows and Linux keep everything; the Mac rebuilds its app (the shader step works again), and
+  the iPhone app gets the settings sheet once you rebuild and install it over the old one.
+- **From 1.3.5 or older:** the same; the notes for those versions below say what else changed.
+
+## New in 1.4.0
+
+### Linux and the Steam Deck
+
+- **New: Linux and the Steam Deck are out of beta.** The Linux download now comes with every release, on the same page and with the same
+  version number as Windows and the Mac, so Link Play versions line up across all of them. Six public betas went before it. The guide is
+  [docs/LINUX.md](https://github.com/xFractals/pokopia-native/blob/main/docs/LINUX.md), and the
+  [Linux / Steam Deck report](https://github.com/xFractals/pokopia-native/issues/new?template=linux-beta-report.yml) form is still the place
+  to tell us when something goes wrong.
+- **New: two downloads, one builder.**
+  - **`Pokopia-Native-Builder-1.4.0-x86_64.AppImage`** is the easy way: the builder as one file, with its own Python and .NET, so there are no
+    terminal steps. Use it on a Steam Deck.
+  - **`Pokopia-Native-for-Linux.zip`** is the same builder for a terminal, or for when the AppImage won't start.
+  - Both are for x86-64 with AVX2 and FMA3, a Vulkan 1.3 driver (SteamOS has one) and about 15 GB free.
+- **New: a Steam Deck starts in the game's handheld mode.** On a Deck (LCD or OLED) the game now picks its own lighter handheld settings.
+  - It draws the 3D scene at 1600x900 instead of 1920x1080; on our PC, handheld mode needed about a quarter less graphics work.
+  - **F1 → Console mode → Docked (TV)** switches back from the next start, and the choice is remembered. Other Linux PCs keep docked mode as
+    before.
+- **Faster on the Steam Deck: the graphics work runs beside the game.** Until now, on a Deck, the game's own work and our translation of its
+  graphics commands took turns on one processor core, which held it to about 30 fps in the betas. In 1.4.0 they run side by side on two cores.
+  - **What we expect:** our estimate for a Deck is about 15 to 20 ms of graphics work and 10 to 17 ms of the game's own work a frame. That is
+    close to the 16.7 ms a 60 fps frame has.
+  - **What we don't know yet:** no Steam Deck has run 1.4.0, so these are estimates, not measurements. Please tell us how it runs (the report
+    has the numbers we need). If it doesn't hold 60 for you, **F1 → Frame rate → 30 fps** gives a steady 30.
+  - **To compare with the old way,** put `NXRT_REPLAY_THREAD=0` in front of the launcher.
+  - **On an OLED Deck,** set the screen to 60 Hz in the Quick Access menu's Performance page: 60 fps doesn't divide evenly into 90 Hz.
+- **New on Linux: change your controller's buttons, choose player 1, and more controllers** (from 1.3.5).
+  - **F1 → Controls → Controller** has the button map and the **Player 1** choice. On Linux they live in the game's F1 menu; the Windows
+    launcher's Controls tab is Windows only.
+  - The Steam Controller and many less common controllers work through SDL's community list of controller layouts, which is now in the Linux
+    download too.
+- **New on Linux: Link Play inside the game, and automatic port forwarding** (from 1.3.5).
+  - **F1 → Link Play** shows the addresses to give your friends, the room code with **Copy invite**, and who is connected.
+  - When you host over the internet, the game asks your router to open the Link Play port. If your router doesn't do it, forward port 47600 by
+    hand as before.
+- **New on Linux: Wide view for 21:9 and wider screens** (experimental, from 1.3.4). **F1 → Graphics → Wide view**, from the next start.
+- **Fixed on Linux, from 1.3.4 and 1.3.5:**
+  - **The freeze after a while on NVIDIA cards**: the long walk through one effect's list is capped.
+  - **AMD and Intel graphics:** the same safety limits now apply there. If the graphics driver crashes while it prepares an effect, the game
+    catches it, leaves that effect out and keeps going, on Linux as on Windows.
+  - **The mouse camera while walking sideways** turns smoothly and in full again.
+  - **Logs no longer contain your room code**, only its first group, so they're safe to attach to reports.
+- **Thank you** to everyone who tested the six betas: **Apocal** above all (the 16:10 sparkles and the steadier frame rate on integrated
+  graphics), the Steam Deck report in [#34](https://github.com/xFractals/pokopia-native/issues/34), and **@Quantumenis** for the PipeWire
+  crackle fix.
+
+### Your own DLC (Windows and Linux)
+
+- **New: your own DLC.** If you bought the game's DLC, give the builder your own dump of it, made the same way as your dump of the game:
+  **Add my DLC** on the builder's last page (or **DLC…** in Advanced, or `nxs2.py import-dlc <build folder> <your DLC folder>`), and choose
+  the folder your dumping tool made from it. It's copied into your build folder (your folder is only read), and the game finds it from its
+  next start. `nxs2.py import-dlc <build folder> --remove` takes it out again.
+- **Only your own.** Pokopia Native never downloads, makes or unlocks DLC: without your dump of it, the game has none. Never share your DLC
+  folder, or a build folder that holds one.
+- The Mac and iPhone apps get it in a later update.
+
+### Windows and Linux
+
+- **New: smoother edges (anti-aliasing).** SMAA, on by default, smooths the stair-stepped edges of curved models, the character editor's
+  included; FXAA is the lighter choice, and Off turns it off. It works before the HUD, so text and menus stay sharp. **F1 → Graphics →
+  Anti-aliasing**, or the launcher's **Display** tab on Windows. On our test PC it costs a fraction of a millisecond a frame.
+- **New: a smoother frame rate when the processor is the limit.** The game's graphics work now runs on a thread of its own, so the game
+  doesn't wait for it every frame: about 16 % more frames on our test PC when the processor was what held it back, and the most help on
+  smaller processors such as the Steam Deck's. To compare, `NXRT_REPLAY_THREAD=0` turns it off (on Windows: `setx NXRT_REPLAY_THREAD 0`,
+  then start the game again; `setx NXRT_REPLAY_THREAD 1` turns it back on).
+- **Fixed: Story co-op, the host's story during a session** (thanks **Skr**). While a Link Play session was open, a Pokémon with a "Time to
+  get chatty!" request asked the host to "bring" themselves over, and the host's story talks stopped. With Story co-op on, the host's story
+  now keeps going while visitors are there (game version 2.0.1, a Windows or Linux host). Finishing a den during a session hasn't been
+  tried yet: please tell us how it goes.
+
+### Windows
+
+- **New, experimental: split-screen co-op on one PC.** In the launcher's **Link Play** tab, **Split screen: two players on this PC** starts
+  two games side by side, joined by Link Play: window 1 hosts with the keyboard and controller 1, window 2 visits with controller 2. The
+  first time, it makes the second player's save once, as a copy of yours (your save is only read). Each game takes about 5 GB of memory,
+  so 32 GB is recommended.
+  - **Limits:** the second player starts as a copy of your character (the same name and look); each window still opens Link Play → Local
+    connection itself; two real controllers, sound and long sessions haven't been tried yet. Please tell us how it goes.
+- **New: Play Pokopia as a program.** The build's `out` folder now has **`Play Pokopia <version>.exe`** and **`Pokopia Settings
+  <version>.exe`**: pin them to the taskbar, or add them to Steam (**Add a Game → Add a Non-Steam Game**). Keep them in the `out` folder:
+  they find the game next to them. The `.cmd` files beside them still work and take the terminal switches.
+
+### The builder and the guides
+
+- **New: a new front page and guides.** The GitHub page is now a short landing page, and the instructions moved into guides: Windows, the
+  Mac, the iPhone, Linux and the Steam Deck, Android, playing together, common problems, your saves, and how it works.
+- **Better: setup leaves out tools it never uses.** nxnative, the host the Mac and iPhone apps run on, carries tools for other games'
+  encrypted files. Pokopia Native never used them; setup now removes them from its copy, and the shader steps no longer load them.
+- **Better: the builder knows 19 more shaders that game version 2.0.1 makes while it runs** (thanks **meitogi**,
+  [#39](https://github.com/xFractals/pokopia-native/issues/39), and **SaranSundar**, [#41](https://github.com/xFractals/pokopia-native/pull/41)).
+  `refresh` now counts them with the known ones instead of listing them apart. Only the count changes: they're recorded and translated
+  the same way as before.
+- **Changed: Import save takes the folder you choose.** It no longer looks for another program's save by itself: choose the folder that
+  holds B00, G00 and S00 (your iPhone's, a Mac's, another PC's, or a copy). The save the game had is still kept beside it.
+
+### Getting it
+
+- **Windows:** unzip 1.4.0 into a new folder and open **Pokopia Native Builder**: it offers **Update my game** and builds again into your
+  build folder, about 10 to 20 minutes on a typical PC. Your settings, save and recorded shaders carry over. Then **Add my DLC**, if you
+  have it.
+- **Linux and the Steam Deck:** download the 1.4.0 AppImage (or the zip) and open it. The builder offers **Update my game** for your build
+  folder, and only what changed is redone. Your save, your settings and your Steam shortcut (`out/play-pokopia-2.0.1.sh`) stay as they are.
+  Afterwards you can delete the beta AppImage and its unpacked copy in `~/.local/share/pokopia-native/builder/1.3.3-beta.*`.
+- **Mac and iPhone:** nothing changed in the apps, so there's no need to rebuild them. Open the builder from the new download once: its
+  setup removes the unused tools.
+- **Link Play:** 1.4.0 plays with 1.3.5 back to 1.3.0; the way games talk to each other didn't change.
+
+
+## New in 1.3.5
+
+### Windows
+
+- **New: change your controller's buttons** (thanks **Atraxia**). One map for every controller: in the game, **F1 → Controls → Controller**, choose a Switch button and press the controller button you want for it (a button another one had swaps over; Home can't be changed). The launcher's **Controls** tab has the same map as a list, and **Reset to defaults** brings the usual layout back.
+- **New: choose which controller is player 1** ([#34](https://github.com/xFractals/pokopia-native/issues/34)). With more than one controller connected, **F1 → Controls → Controller → Player 1** picks it, and it's remembered whenever that controller connects.
+- **New: more controllers.** The Steam Controller works, and so do many less common controllers, through SDL's community list of controller layouts (SDL_GameControllerDB, now in the download). A controller the list doesn't know gets a guessed layout instead of being ignored, and you can fix its buttons on the Controller page.
+- **New: Link Play inside the game.** Press **F1** and open the **Link Play** tab:
+  - **What it shows:** how you're playing, the addresses to give your friends, the room code with **Copy** and **Copy invite** (your address and code in one line, ready to paste in a chat), and who is connected.
+  - **Change how you play:** switch the way to play, the host's address and the room code without going back to the launcher. These apply at once while the game's Link Play is closed. Turning Link Play on or off, Interact everywhere and Story co-op apply from the next start. The launcher remembers your choice.
+- **New: automatic port forwarding when you host over the internet.** The game asks your router to open the Link Play port (UPnP, NAT-PMP or PCP) while you host, and closes it again when you stop. F1 → Link Play says whether it worked and what to do if it didn't: for example, when your internet provider shares one address among many homes, only a VPN helps. It's new and was tested against simulated routers, so tell us how it goes with yours. If your router doesn't do it, forward port 47600 by hand as before.
+- **Fixed: the game froze after a while on NVIDIA cards** (thanks **Styphix** and **Folkarein**). One of the game's effects walks a list whose length comes from the game's data; when that number came out wrong, the card kept walking it until Windows reset it. That walk is now capped at a safe length.
+- **Fixed, AMD cards:**
+  - **A crash at the same spot every time** (thanks **Jayrar**). AMD's driver could crash while preparing one particular effect. Now the game catches that, leaves the effect out and keeps going.
+  - **Freezes** (thanks **Santriman**). The safety limits that fixed this kind of freeze on NVIDIA now apply on AMD too, and if the card still gets stuck, the log names the effect, as it already did on NVIDIA.
+  - These were tested on our PC with simulated driver crashes, not yet on an AMD card. Please report how it runs.
+- **Logs no longer contain your room code**, only its first group, so logs are safe to attach to bug reports.
+
+### Windows, Mac and iPhone
+
+- **Fixed: the mouse camera felt stuttery while walking sideways** (thanks **Groot**). Since 1.3.3 the camera turned in small steps whenever you walked sideways. Now that only happens while the game's own **Camera Auto-Follow** is actually turning the camera; with Auto-Follow off (in the game's Settings, Camera tab), the mouse turns the camera directly and smoothly again. The same goes for the trackpad on the Mac and look drags on the iPhone.
+
+### The builder (Mac)
+
+- **Fixed: "Python add-ons — To fix: the steps below" with no steps.** When your Python comes from Homebrew, the window now shows the one Terminal command that sets up the builder's own Python, with a **Copy** button, and tells you to reopen the builder afterwards.
+- **Better: the Metal check says why it fails.** Most often Terminal is set to Apple's separate Command Line Tools instead of Xcode, even after you install the Metal toolchain; the check now spots that and gives the command to switch to Xcode. It also catches a not-yet-accepted Xcode license, Xcode's first-launch setup, and a missing Metal toolchain or iOS platform.
+
+### Linux
+
+- **Linux and the Steam Deck:** the open beta's current release is **[v1.3.3-linux-beta.5](https://github.com/xFractals/pokopia-native/releases/tag/v1.3.3-linux-beta.5)** (1.3.3 with a fix for sparkles on 16:10 screens, a steadier frame rate on integrated graphics, a clearer builder window and a report tool that finds your build by itself). A later beta brings 1.3.5.
+
+### Getting it
+
+- **Windows:** unzip 1.3.5 into a new folder and open **Pokopia Native Builder**: it offers **Update my game** and builds again into your build folder, about 10 to 20 minutes on a typical PC. Your settings, save and recorded shaders carry over.
+- **Mac and iPhone:** for the camera fix, rebuild the Mac or iPhone app (**Update my game**), then run **Refresh the graphics** again afterwards. Install a new iPhone app **over** the old one (never delete the app first: that deletes its save).
+- **Link Play:** 1.3.5 plays with 1.3.4 and 1.3.3; the way games talk to each other didn't change.
+
+## New in 1.3.4
+
+### Windows
+
+- **New, experimental: Wide view for 21:9 and wider screens.** Off by default. On an ultrawide monitor or window, the game's world fills the whole width instead of black bars at the sides, and the HUD, menus, text and map stay in the middle 16:9 part of the screen.
+  - **Turning it on:** in the launcher's **Display** tab ("Wide view: On (experimental)"), or in the game: **F1 → Graphics → Wide view**. It takes effect at the next start. On a normal 16:9 screen it changes nothing.
+  - **For a sharp picture,** pick a Resolution at least as wide as your screen (for a 3440x1440 monitor, **3840x2160**, if your graphics card can handle it). The default counts by height and looks a little soft across the width.
+  - **Photos** come out at the usual 16:9, showing what was inside the viewfinder.
+  - **Limits:** full-screen menus such as the camera menu and the album show black bars at the sides. Speech bubbles and the markers over things near the sides of the screen drift toward the middle and can be cut off at the edge of the middle area. Not checked yet: the story's movies and 32:9 screens. Game 1.0.5 and 2.0.1. Not on the Mac or iPhone (they run their own Metal engine); Linux uses the same code but isn't tested yet.
+  - **Planned:** widening the game's own HUD and menus to fill the whole screen.
+- **New: a clear message when the game finds no graphics card it can use.** Until now the window just closed. Now a box names what was found, for example "Intel(R) UHD Graphics (Vulkan 1.2)", and what to do. Most often a gaming laptop's NVIDIA or AMD card isn't seen because its driver is missing: install the newest driver from nvidia.com or amd.com, restart, and try again.
+
+### Windows, Mac and iPhone
+
+- **Fixed: the mouse camera turned slower while walking sideways or diagonally** ([#31](https://github.com/xFractals/pokopia-native/issues/31), after 1.3.3's fix). Fast turns now land in full while you move, the same as standing still. The same goes for the trackpad on the Mac and look drags on the iPhone.
+
+### The builder
+
+- **Fixed: Copy on the checks page put several `pip install` commands on one line**; it now gives one command that installs everything missing. Thanks **@Shabbypenguin** ([#33](https://github.com/xFractals/pokopia-native/pull/33))!
+
+### Linux
+
+- **Linux and the Steam Deck:** the open beta's current release is **v1.3.3-linux-beta.4** (1.3.3). A later beta brings 1.3.4.
+
+## New in 1.3.3
+
+### Windows, Mac and iPhone
+
+- **Fixed: the mouse camera wouldn't turn left or right while walking sideways or diagonally** ([#31](https://github.com/xFractals/pokopia-native/issues/31); up and down still worked). While your character moves sideways, the game's own camera turns to follow you, and it overrode the mouse. Now, while you move sideways, the mouse turns the camera the way a controller's stick does, and the game takes it. The same goes for the trackpad on the Mac and look drags on the iPhone. While moving sideways, a very fast flick turns at most as fast as a full stick tilt.
+
+### Windows
+
+- **Fixed: another freeze on NVIDIA cards** (a GTX 1650 after about an hour on 1.3.1). A second graphics program that walks a list of lights now stops at the list's real length, like 1.3.1's fix. If the game still freezes, the log now records more of what that program was given.
+- **Fixed: lag near water** ([#27](https://github.com/xFractals/pokopia-native/issues/27)). The game sent the graphics card data the card had just made itself, again and again; near water that came to 50 to 90 MB a frame and halved the frame rate on some PCs. On our test route it now sends about a fifth as much (6.3 MB a frame down to 1.4), and what doesn't fit the upload buffer goes in larger blocks.
+- **For AMD players helping with the purple line:** a new test switch, `NXRT_VK_SKIP`, turns off one graphics effect at a time to find the one that's drawn wrong. The steps are on Discord.
+
+### Co-op
+
+- **Interact everywhere and Story co-op now work on game version 1.0.5 too.** Until 1.3.2 they needed 2.0.1, and with a 1.0.5 dump they quietly did nothing. **Every 1.0.5 player needs to update for co-op to match:** a 1.0.5 device on 1.3.2 or older never really had them on, so a 1.3.3 device with them on won't find it, and the other way round. Turn them on on every device, as before.
+- **Playing through a VPN (Radmin VPN, Hamachi, Tailscale):** use the internet choices with the host's VPN address and the room code. On Windows they're now called **Host over the internet or a VPN** and **Visit a host over the internet or a VPN**; through a VPN no port forwarding is needed. **Link Play with players on this network** doesn't reach through a VPN: Pokopia Native counts a VPN's addresses as internet addresses. If you give the Windows launcher a VPN address without internet play, it now says so before the game starts, and the log names the VPN.
+
+### Linux
+
+- **Linux and the Steam Deck:** the open beta's current release is **v1.3.0-linux-beta.3**. A beta 4 with 1.3.3's fixes is being prepared.
+
+## New in 1.3.2
+
+### Windows
+
+- **Fixed: 1.3.1 crashed on AMD graphics cards** about 20 seconds in (seen on a ROG Xbox Ally X; the crash report names `amdvlk64.dll`). 1.3.1's fix for an NVIDIA freeze changes one of the game's graphics programs, and AMD's Windows driver crashed preparing the changed program. That fix now applies on NVIDIA cards only, where the freeze happened; AMD and Intel cards run that program as they did in 1.3.0.
+- **If you used the workaround** (`setx NXRT_VK_LOOP_GUARD 0`): on an AMD or Intel card you can leave it, it does the same as 1.3.2 does by itself. On an NVIDIA card, remove it so the freeze fix stays on: open PowerShell and run `reg delete HKCU\Environment /v NXRT_VK_LOOP_GUARD /f`, then close the builder and start the game again.
+
+### Mac, iPhone and Linux
+
+- **Mac and iPhone:** nothing changed but the version number, so there's no need to rebuild. If you rebuild the Mac or iPhone app anyway, run **Refresh the graphics** again afterwards.
+- **Linux and the Steam Deck:** the open beta has its own release, **v1.3.0-linux-beta.3**. It never had 1.3.1's change, so this crash doesn't affect it.
+- **Link Play:** 1.3.2 plays with 1.3.1 and 1.3.0; co-op didn't change.
+
+## New in 1.3.1
+
+### Windows
+
+- **Fixed: another freeze on NVIDIA cards** (a GTX 1650 after about an hour of play, an RTX 3050 Laptop). The graphics card stopped responding in one of the game's graphics programs, one that walks a list of items: it now stops at the list's real length, so a bad count can't keep the card busy. If the game still freezes for you, please send the newest log: it now also records what that program was given.
+- **Fixed: the build failed in a folder with an accented letter** in its path, for example "Pokémon" or a French "Téléchargements" folder ("lld-link: error: could not open ...\p0000.obj: No mapping for the Unicode character exists in the target multi-byte code page"). Any folder name works now.
+- **Fixed: ".NET 10 missing" right after installing it.** Windows only gives a new install to programs started afterwards, so the builder's **Check again** couldn't see .NET installed while the builder was open. It now looks in .NET's own folder too.
+- **New, for AMD and Intel graphics: a 32-lane test mode, off by default.** The game's graphics programs were written for NVIDIA-style groups of 32; AMD cards run 64 and Intel cards 8 to 32, which may be behind the freezes some of you see, often in conversations. To try it, open PowerShell and run `setx NXRT_VK_SUBGROUP32 1`, close the builder if it's open, then start the game as usual; the log then says "made with 32 lanes". `setx NXRT_VK_SUBGROUP32 0` turns it off again. Please tell us how it goes, on Discord or in a GitHub issue.
+
+### Mac, iPhone and Linux
+
+- **Mac and iPhone:** nothing changed but the version number, so there's no need to rebuild. If you rebuild the Mac or iPhone app anyway, run **Refresh the graphics** again afterwards.
+- **Linux and the Steam Deck:** the open beta has its own release, **v1.3.0-linux-beta.2**, which fixes the start-up crash on Fedora, SteamOS (the Steam Deck), Arch and others.
+- **Link Play:** 1.3.1 plays with 1.3.0, and with 1.2.x and 1.1.x while Interact everywhere and Story co-op are off; co-op didn't change.
+
+## New in 1.3.0
+
+### Windows: the graphics update
+
+- **New: a sharper picture.** The new **Resolution** setting draws the game itself at a larger size (the 3D scene, its lighting, effects and the HUD), not just the finished picture stretched to your window. The choices are the real sizes the game draws at: **Default: your monitor** (where the game starts), **1920x1080** (the game's own size, as before), **2560x1440** and **3840x2160**. On a graphics card with 4 GB of its own memory or less, Default stops at 2560x1440 so the card doesn't run out; 3840x2160 can still be picked by hand. Bigger sizes need more from the graphics card: on a slower card, pick a smaller one.
+- **New: settings inside the game.** Press **F1** (or **Minus + Plus** together on a controller) for a settings window over the game:
+  - **Graphics:** Resolution, Display mode, Window size, Console mode, Upscaling, Sharpness, Frame rate, Vsync and an **FPS counter**.
+  - **Controls:** the keyboard key for each action. Picking a key another action had swaps the two; Reset to defaults brings the usual keys back.
+
+  Changes apply at once, without a restart (Console mode applies from the next start). They're saved, and the launcher's Display and Controls tabs show the same settings.
+- **New: less processor work per frame**, about a third less: 7.5 ms → 5.0 ms in the field on our test PC. A fast PC was already at 60 fps; a slower one should gain frames. This is three changes by **@Quantumenis**: textures rewritten with the same bytes aren't uploaded again, draws record only the settings that changed, and identical resource bindings are reused within a frame. Thank you, Quantum!
+- **Fixed: the 30 fps setting did nothing** (a known issue in 1.2.6, spotted by Quantumenis). Each frame now stays on screen for two refreshes, and the world still moves at the right speed.
+- **Fixed: the game freezing on some NVIDIA cards**, seen on an RTX 3050 Laptop ("the GPU stopped responding" in the log). It's the same kind of hang 1.2.5 fixed for RTX 50 cards, in a different graphics program. The fix now covers every graphics program of that kind in the game (11 of them), not just one. It applies on NVIDIA cards only, where these freezes happen; AMD and Intel cards run those programs as they were translated, as before 1.2.5. If the game still freezes for you, please send the newest log (see Known issues).
+- **The launcher's Display tab** lists the same sizes as the in-game menu, and names the console modes "Docked (TV)" and "Handheld".
+
+### Windows and Mac: a step-by-step builder
+
+- **New: the builder walks you through it.** Open **Pokopia Native Builder** and it asks what you want to make (this PC or Mac, the iPhone), checks your computer and runs Setup for you, finds your game files (and tells you which game version they are), shows where the build goes and the free space there, then builds with plain-English steps and a progress bar. When something is missing or fails, it says what to do, with the real error message and a button to copy it for the Discord.
+- **It remembers where you are.** After the first build of the Mac or iPhone app, opening the builder again shows **Refresh the graphics** as your next step. Opening it from a new download offers **Update my game**.
+- **Advanced** (top right) is the one-screen window with every button, as before. The command line is unchanged.
+
+### Co-op: Story co-op (experimental)
+
+**Link Play visitors can now talk to the story characters in every town.** In a story town the game lets only the host talk
+to characters like Professor Tangrowth: a visitor got the "Talk" prompt, and nothing happened. With **Story co-op** on,
+visitors talk to them and hear the same story as the host, including the host's current requests.
+
+- **What counts for the host:** everything visitors do in the world, as with Interact everywhere (which Story co-op turns on
+  with it): building, watering, placing and picking up, and the host's challenges (habitats too, we expect, but that
+  isn't tested end to end yet).
+- **What doesn't:** story requests still count only for the host. A visitor can hear a request, but finishing the
+  conversation doesn't complete it; the host has to. A visitor's shop purchases still go to their own town, so for a
+  building request the host buys the kit and drops it for the visitor.
+- **Turn it on on every device:** iPhone and Mac: **Story co-op** in the launcher (under Link Play); Windows: the **Story
+  co-op (experimental)** box in the window before the game starts, or `-Story` from a terminal. A device with it on only
+  sees hosts that have it on too; with it off, nothing changes from 1.2.x.
+- **It is experimental.** Tested with two players in Withered Wasteland (story areas at Environment Level 2 and 3). Keep a copy
+  of your save before a long session, and please report what does or doesn't work.
+
+### Getting it
+
+- **Windows:** unzip 1.3.0 into a new folder and open **Pokopia Native Builder**. The walkthrough checks your PC, runs Setup and builds again into the same build folder: the game's code is relinked from what is already compiled (a few minutes), the runtime and launchers are replaced, and no shader is translated again. (In Advanced: Setup once, then Build.) Your settings and save carry over.
+- **Mac:** the same. The game's code rewrite and the Mac host are redone and the app is repacked, a couple of minutes; no shader is recompiled.
+- **iPhone:** build the new iPhone app the same way and install it **over** the old one (never delete the app first: that deletes its save). You need it for Story co-op; nothing else changed for the iPhone.
+
+## New in 1.2.6
+
+- **Fixed, Windows: particle effects that 1.2.4 had to skip are drawn** ([#17](https://github.com/xFractals/pokopia-native/issues/17), [#20](https://github.com/xFractals/pokopia-native/issues/20)). Some effects draw as many copies of themselves as a number the graphics card writes just before. The game read that number on the computer before the card had written it, so the effect didn't show, or (in 1.2.3 and older) the card froze. Now the card reads the number itself when it draws, capped so it can never keep the card busy. One such effect is in the intro, in the cave after you choose your look.
+- **Fixed, Windows: Play said the game's files were missing when a folder's name contains square brackets**, such as `Pokopia_v2.0.1a[Base_Game_and_Update]`. Spotted by Quantumenis in the Discord.
+- **Fixed, Windows: "The operation was canceled by the user" when starting the game.** Windows marks everything unzipped from a download as coming from the internet, and then refused to start the game. Setup, Build and the launcher now take that mark off Pokopia Native's own files.
+- **New, Windows: Pokopia Settings**, a launcher beside Play Pokopia in your build folder's `out` folder. It opens the window before the game (Link Play, Controls, Display) even after you ticked "Don't ask again". Holding Shift while starting still works too.
+- **Fixed, Mac: Refresh and rebuilds failed on exFAT drives** ([#23](https://github.com/xFractals/pokopia-native/issues/23)) with "Operation not supported" once the app existed. The app is now replaced in a way those drives support. No shader is rebuilt.
+- **Fixed, Mac: Build stopped with "translation chain tools do not match the lock file: the translator does not run"** ([#26](https://github.com/xFractals/pokopia-native/issues/26)) when .NET came from Homebrew's `dotnet` formula, even though Check tools found it. The builder now finds that .NET's runtime.
+- **Mac download:** the shader translator no longer ships its debug-symbols file.
+- **Getting it:** Windows: unzip 1.2.6, run **Setup** once, then **Build** with the same build folder: the runtime and the launchers are replaced, nothing is recompiled. Mac: unzip 1.2.6, run **Setup** once, then **Build** with the same build folder: no shader is rebuilt. iPhone: nothing changed.
+
+## New in 1.2.5
+
+- **Fixed, Windows: the game freezing on RTX 50-series graphics cards** ([#12](https://github.com/xFractals/pokopia-native/issues/12), [#21](https://github.com/xFractals/pokopia-native/issues/21), [#22](https://github.com/xFractals/pokopia-native/issues/22)), often right after loading a save or as soon as you start moving. One of the game's graphics programs ends with a quick vote among the GPU threads running it, to add up a counter. On RTX 50 cards that vote never finishes once some of those threads are already done, so the card stopped responding. The game now has each thread add its own share instead, which gives the same count. Only that one program changes; every other card runs it the same as before. **Found and fixed by #12's reporter, @Quantumenis**, who tracked the freeze down to the exact instruction. Thank you!
+- **Getting it:** Windows: unzip 1.2.5, run **Setup** once, then **Build** with the same build folder: only the game's runtime is replaced, nothing is recompiled. Mac and iPhone: nothing changed for them.
+
+## New in 1.2.4
+
+- **Fixed, Windows: the game freezing when certain particle effects start** ([#17](https://github.com/xFractals/pokopia-native/issues/17), [#20](https://github.com/xFractals/pokopia-native/issues/20)). Some effects draw as many copies of themselves as a number the graphics card writes. The Windows game read that number before the card had written it, once got about a billion, and the card stayed busy past Windows' 10-second limit, so the picture froze. Such a draw is now skipped; where the game used to freeze, that effect may be missing for a moment. Confirmed by #20's reporter. Drawing the effect properly is planned. First seen on RTX 50-series cards, but not limited to them.
+- **New, Windows: a report when the graphics card stops responding.** On NVIDIA cards the log now names the shader the card was running and the last one it finished, and the driver's own fault report is logged where it offers one. If the game still freezes for you, attach the newest log from `%LOCALAPPDATA%\Pokopia Native\<game version>\logs\` to an issue.
+- **New, builder: "Need help? Ask on Discord"** at the top of the builder window, and in the message when a step fails.
+- **Getting it:** Windows: unzip 1.2.4, run **Setup** once, then **Build** with the same build folder: only the game's runtime is replaced, nothing is recompiled. Mac and iPhone: only the builder window's Discord link is new.
+
+## New in 1.2.3
+
+- **New, Windows: sharper on big screens.** The game draws at 1920x1080; on a 1440p or 4K screen (or any window larger than that) it was stretched with a plain filter and looked blurry. A sharp upscaler now sharpens each pixel against its neighbours by how much contrast is around it (strong in flat areas, gentle at edges, so no halos) while it scales. It is on by default and costs no frame rate on the test PC (full screen at 4K: 60 fps either way, about 40 % more edge detail).
+- **New, Windows: a Display tab** in the window before the game starts, next to Link Play and Controls ([#16](https://github.com/xFractals/pokopia-native/issues/16), [#18](https://github.com/xFractals/pokopia-native/issues/18)): **Console mode** (docked 1920x1080, or handheld 1280x720 and lighter), **Display mode** (window or full screen) and the **window size**, **Upscaling** (Sharp or Standard) with a **Sharpness** slider, **Frame rate** (60 or 30) and **Vsync**. Saved for this PC and used at every start, "Don't ask again" included. (After "Don't ask again", hold **Shift** while starting to see the window.) The Mac's launcher already has its own Console mode, Display mode and Upscaling (MetalFX).
+- **Still to come:** drawing the game itself above 1080p is a bigger change and is planned for a later update.
+- **Getting it:** Windows: unzip 1.2.3, run **Setup** once, then **Build** with the same build folder: only the game's runtime and its window are replaced, nothing is recompiled. Mac and iPhone: nothing changed for them.
+
+## New in 1.2.2
+
+- **Fixed, Windows: invisible characters on AMD graphics cards** ([#14](https://github.com/xFractals/pokopia-native/issues/14)). AMD's driver allows a graphics buffer of at most 2 GB, and the game's biggest memory pool is about 3.4 GB. The Windows game left that pool out on AMD, and the character models in it were drawn as nothing. Big pools now get several buffers that share the same memory. Tested by capping our NVIDIA card at AMD's limit: the characters are drawn and the picture matches an uncapped run. Not yet confirmed on a real AMD card; please report how it runs.
+- **Fixed, Windows: stuck at "What's your name?" with only a controller.** The name question opens a small box over the game that needed a keyboard, and while it was up the game ignored the controller. Now **A, B or +** on the controller accepts it; an empty box becomes "Player". The game won't let you change your name later, so a keyboard is still best for this one. The box also comes to the front reliably, in full screen too.
+- **Getting it:** Windows: unzip 1.2.2, run **Setup** once, then **Build** with the same build folder: only the game's runtime is replaced, nothing is recompiled. Mac and iPhone: nothing changed for them.
+
+## New in 1.2.1
+
+- **Fixed, Mac: the Python packages could not be installed** ("externally-managed-environment", [#13](https://github.com/xFractals/pokopia-native/issues/13)). Homebrew's Python takes no pip packages of its own, so the README's `pip install` line failed. The builder now has its own environment: once, in Terminal,
+  ```bash
+  brew install python@3.12 python-tk@3.12
+  python3.12 -m venv ~/.pokopia-native/venv
+  ~/.pokopia-native/venv/bin/python -m pip install "capstone>=5,<6" lz4 fonttools pillow
+  ```
+  **Pokopia Native Builder.app** uses it by itself, and **Check tools** shows these steps when it finds such a Python. For the README's commands, run `source ~/.pokopia-native/venv/bin/activate` first.
+- **Getting it:** Mac: unzip 1.2.1, make the environment above if you haven't, open the Builder and run **Setup** once; the apps you built with 1.2.0 stay as they are. Windows: nothing changed for the Windows game; 1.2.1 only carries the new version number.
+
+## New in 1.2.0
+
+### Interact everywhere (experimental)
+
+Outside Palette Town the game puts everyone in a Link Play session in Spectator Mode: visitors can walk around and watch, but certain moves and items don't work and they can't build. **Interact everywhere** gives every town the rules Palette Town has with Spectator Mode off, so visitors can water, pick up and place things, and build alongside the host.
+
+- **Turn it on on every device:** iPhone and Mac: **Interact everywhere** in the launcher (under Link Play); Windows: the **Interact everywhere (experimental)** box in the window before the game starts. A device with it on only sees hosts that have it on too.
+- **Tested:** two Windows PCs; Windows and Mac, each hosting; a Windows PC hosting with an iPhone visiting in Withered Wasteland, where the visitor watered dry ground into grass and picked up boxes and items.
+- The game still shows its own words: the host's settings show Spectator Mode On (greyed out), and the visitor is told everyone will be restricted. The session is not restricted.
+- As in any Link Play visit, the town and its progress (challenges, building) belong to the host, and what a visitor picks up goes home with them.
+- Game version 2.0.1 only; on 1.0.5 the switch does nothing.
+
+### Windows
+
+- **New: a Controls tab for the keyboard.** The window before the game starts has a **Controls** tab: click an action, then press the key you want for it (a key another action had swaps over); **Reset to defaults** brings the standard layout back. Keys count by their place on the keyboard, so a layout works under any keyboard language. It is saved in `%APPDATA%\Pokopia Native\controls.json`. Esc, F11, Alt and the Windows keys can't be used. (After "Don't ask again", hold **Shift** while starting the game to see the window.)
+- **New: the window says when there is no save yet.** Without **Import save…** the game quietly started a new save; the window now says so in red and points to Import save.
+- **Fixed: console windows during play with builds made by 1.1.0's builder window.** Their settings named `pythonw.exe`, so every tool the run-time shader translator ran opened its own window. The game's launcher now uses `python.exe` beside it, without a rebuild.
+- **Fixed: `pip install lz4` failing on Python 3.15** ("Microsoft Visual C++ 14.0 or greater is required"). lz4 has no ready-made package for 3.15 yet. `Pokopia Native Builder.cmd` now uses an installed Python 3.14, 3.13 or 3.12 that has lz4, and **Check tools** explains what to do when 3.15 is the only one.
+- **Fixed: Setup failing with "No such file or directory"** for a file in its own folder. Windows Security's Controlled folder access (or an antivirus) blocks Python in Documents, Desktop, Downloads and Pictures. Setup and Build now check first and say what is blocking them: move the folders elsewhere (for example `C:\Pokopia Native`) or allow `python.exe`.
+
+### Mac
+
+- **Fixed: Pokopia Native Builder did nothing on macOS 27** (its log: `nxs2_gui.py: No such file`). macOS ran the app from a temporary copy away from its folder (App Translocation), because the download was still marked as downloaded. The app now finds its real folder by itself.
+
+### The builder window
+
+- **Clearer text, on Windows and the Mac:** numbered steps (your dump, the build folder, what to make), both game versions named (2.0.1 and 1.0.5), and a line saying what each button is for and in which order. When a build finishes, it says what to do next.
+
+### Source
+
+- The Windows source in `windows/` now includes `src/coop/nxnative/` and `src/swapin/nxnative/`, which an ignore rule left out of the 1.1.x snapshots.
+- The Windows shader translator (`host/windows/dmsh_xlate_bin`) no longer ships its debug-symbols file.
+- `LEGAL.md` says how rights holders can ask for a change or removal.
+
+### Getting it
+
+- **Windows game:** unzip 1.2.0, run **Setup** once, then **Build** with "Windows: play on this PC" ticked, using the same build folder: the game's runtime and its window are replaced, nothing is recompiled.
+- **Mac and iPhone:** unzip 1.2.0, run **Setup** once, then **Build** again with the same build folder: the apps' Link Play code changed, so they are rebuilt (only what changed is redone; your recorded shaders stay). Sign the new iPhone app and install it **over** the old one (never delete the app first: that deletes its save).
+
+## New in 1.1.2
+
+- **Fixed, Windows: new games got stuck at "What's your name?".** The Windows game never showed a keyboard when the game asked for text, so a new game could not get past Tangrowth's name question. A small text box now opens over the game: type the name and press Enter (Esc cancels). Mac and iPhone were not affected.
+- **Fixed, Windows: freezes on a first play-through.** The first time the game drew something new, the graphics driver built it on the spot, freezing the game for up to half a second. The builder now ships a list of the game's graphics pipelines (2.0.1: the title, a new game and the first towns), and the game builds them on background threads while it starts. In our test with an empty cache, the pipelines built in the middle of play went from 213 to 1, and the opening area ran at a steady 60 fps.
+
+## New in 1.1.1
+
+- **Fixed, Windows: hundreds of terminal windows during the shader step.** Building from the builder window could open a new console window for every tool the shader step ran and freeze the PC. The build now runs in one hidden console that all its tools share.
+- **New: `.nup` dumps.** A `.nup` file (an open container for already-decrypted dumps) works as your dump: **.nup file…** in the window, or `nxs2.py build <file>.nup`. The builder unpacks the update it needs into the build folder once (about 7 GB more) and builds exactly as from a dump folder. It needs Python's `zstandard` module: `python -m pip install zstandard`.
+
+## New in 1.1.0
+
+### The Windows game
+
+The "for Windows PCs" download builds **Pokopia for Windows** from your dump: the game's arm64 code is recompiled for your PC (our own recompiler, through LLVM) and runs on our own runtime with a Vulkan renderer. No emulator.
+
+- Both game versions, **1.0.5 and 2.0.1**.
+- **60 fps** in the field on the test PC; mouse look written straight into the game's camera, as on the Mac; controllers (Xbox, PlayStation, Switch Pro) as Switch controllers, with rumble and motion; SDL3 sound.
+- **Your save**: `%APPDATA%\Pokopia Native\<version>\save`; **Import save…** (or `nxs2.py import-save`) brings yours from the iPhone or the Mac. Windows saves load on the Mac and the iPhone.
+- **Run-time shaders** are recorded and translated on the spot the first time the game makes them; no refresh step.
+- **No installer, no administrator rights, no compiler**: the download brings its own tools in `windows\bin` (their notices in `windows\bin\THIRD-PARTY-NOTICES.txt`). It needs Windows 10/11 64-bit, an AVX2 CPU, a Vulkan 1.3 GPU, Python 3.12–3.14, the .NET 10 runtime and git, and about 12 GB per game version. The build took 20 minutes on the test PC (4 workers; longer on smaller PCs), at idle priority. Details: [docs/WINDOWS.md](https://github.com/xFractals/pokopia-native/blob/main/docs/WINDOWS.md).
+- The source is in `windows/` (MIT).
+
+### Link Play between our builds
+
+The game's **Link Play → Local connection** works between our builds: Windows, Mac and iPhone in any mix, up to four players, without Nintendo's servers. ("Online connection" in the same menu is Nintendo's service and does nothing here.)
+
+- **On the same Wi-Fi:** turn on **Link Play on this network** in the iPhone or Mac launcher; on Windows a window before the game starts asks how you want to play. Hosts find each other by themselves.
+- **Over the internet** (opt-in): the host forwards port **47600 (TCP and UDP)** on its router and shares its address and a **room code**; visitors type both in (iPhone / Mac: **Join address**, **Internet play**, **Room code** in the launcher; Windows: "Visit a host over the internet" in that window, while a Windows host gets its code in a window with a **Copy** button). Every connection proves the room code and every message is protected against changes; the traffic is not encrypted.
+- **Tested:** a Windows PC hosting with an iPhone visiting over home Wi-Fi, and over the internet with the phone on mobile data; Windows and Mac together; four players; players leaving and coming back.
+- Windows asks once to allow the game on networks (allow **Private**), and the network must be Private; the iPhone and the Mac ask once for local network access.
+- Steps and tips (Tailscale when you cannot open a port): the README's [Playing together](https://github.com/xFractals/pokopia-native#playing-together-link-play).
+
+### Builder
+
+- **The build folder on another drive** than the tool now works (nxnative's `DM_GAMES_DIR` is split on the system's path separator, not on `:`).
+- **Windows without Apple's tools**: `nxs2.py setup --no-ios` (or Setup with "iPhone IPA" unticked) sets up the Windows game only.
+- The Windows game's recordings of the run-time shaders also finish the iPhone app of the same build folder (`nxs2.py refresh` picks them up).
+- `nxs2.py --version`; the window's title shows the version.
+- **Windows: when the builder window does not open**, `Pokopia Native Builder.cmd` now says why and waits (no Python, a Python older than 3.12, the Microsoft Store's "python" placeholder, Python without Tk), and writes `builder-log.txt` beside itself for a report.

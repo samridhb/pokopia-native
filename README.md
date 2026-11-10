@@ -107,10 +107,11 @@ The builder checks all of this for you and tells you what to install.
 | **Import a save** | ✓ | By hand | By hand | Not yet | ✓ |
 | **Your own DLC** | ✓ | Soon | Soon | — | ✓ |
 
-On the Mac the settings open with F1 (fn-F1 on most Mac keyboards) or Settings… (⌘,); on the iPhone, press Home on a controller or hold the
-2D / 3D button. Link Play is for up to four players; Story co-op is experimental. Saves move between a PC, a Mac and an iPhone ([how](docs/SAVES.md)).
+On the Mac the settings open with F1 (fn-F1 on most Mac keyboards) or Settings… (⌘,). On the iPhone, press Home on a controller, or
+without one hold the round layout button at the top centre of the screen (2D, 3D or Tap) for about a second. Link Play is for up to four
+players; Story co-op is experimental. Saves move between a PC, a Mac and an iPhone ([how](docs/SAVES.md)).
 
-**On the way:** smoother edges (anti-aliasing).
+**On the way:** your own DLC on the Mac and iPhone.
 
 ## Play together
 

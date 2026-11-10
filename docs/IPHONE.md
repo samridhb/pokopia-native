@@ -119,7 +119,9 @@ the Mac app or the Windows game from the same build folder, their recordings cou
 - **For the smoothest look,** turn the game's own **Camera Auto-Follow** off (in the game's Settings, Camera tab). With it
   on, the camera turns in small steps while you walk sideways.
 
-**Settings during the game:** press **Home** on a controller, or hold the **2D / 3D** button. A sheet opens over the game:
+**Settings during the game:** with a controller, press its **Home** button. Without one, hold the round **layout button** at the top
+centre of the screen (it reads **2D**, **3D** or **Tap**) for about a second; a quick tap still just switches the touch layout. The
+on-screen controls, that button included, hide while a controller is connected. A sheet opens over the game:
 - **Controller buttons:** one map for every controller.
 - **Player 1:** pick which controller it is; it's remembered.
 - **Graphics:** console mode, upscaling and the frame-rate counter.
